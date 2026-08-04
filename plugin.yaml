@@ -1,0 +1,27 @@
+name: reqall
+version: 2026.8.4
+description: >
+  Reqall persistent semantic memory for Hermes — session context injection,
+  pre-edit recall, post-work persistence nudges, skills, and MCP.
+author: ReqallSystem
+manifest_version: 1
+requires_env:
+  - name: REQALL_API_KEY
+    description: Reqall API key (Bearer) for MCP / hook recall
+    url: https://www.reqall.net
+    secret: true
+provides_hooks:
+  - on_session_start
+  - pre_llm_call
+  - pre_tool_call
+  - post_tool_call
+  - on_session_end
+provides_commands:
+  - reqall
+provides_skills:
+  - reqall-context
+  - reqall-persist
+  - reqall-document
+  - reqall-triage
+  - reqall-review
+  - reqall-sleep
