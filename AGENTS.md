@@ -9,19 +9,49 @@ Do this automatically. Do not wait for the user to ask.
 
 ## Tools
 
-Prefer the **Reqall MCP** tools once configured (`hermes` MCP server `reqall`).
-Names may be prefixed by the host (for example `mcp_reqall_search`).
+### Preferred (always available when plugin is enabled)
 
-Core operations:
+Plugin tools (no host MCP injection required):
 
-- `search` / `upsert_project` / `upsert_record` / `get_record` / `list_records`
-- `upsert_link` / `list_links` / `impact`
-- `sleep_candidates` / `sleep_apply`
-- `delete_record` / `delete_link` (only if the user explicitly asks)
+| Tool | Purpose |
+|------|---------|
+| `reqall` | Call Reqall API: `action` = MCP tool name, `arguments` = object |
+| `reqall_status` | Auth, project, dirty flag, host MCP probe |
 
-Plugin helper: `reqall_status` tool and `/reqall` slash command.
+Example:
+
+```text
+reqall action=upsert_record arguments={project_id, kind, title, body, status}
+reqall action=search arguments={query, project_name?, limit?}
+reqall action=upsert_link arguments={source_id, source_table, target_id, target_table, relationship}
+```
+
+### Host MCP (when configured and visible in this session)
+
+Configure `mcp_servers.reqall` in Hermes config. Hermes names tools:
+
+```text
+mcp__reqall__search
+mcp__reqall__upsert_project
+mcp__reqall__upsert_record
+mcp__reqall__get_record
+mcp__reqall__list_records
+mcp__reqall__upsert_link
+mcp__reqall__list_links
+mcp__reqall__impact
+mcp__reqall__sleep_candidates
+mcp__reqall__sleep_apply
+```
+
+**Not** `mcp_reqall_*` (single underscore). If MCP was enabled after this chat started, tools may be missing until **`/new`** (prompt-cache tool freeze). Prefer plugin `reqall` when unsure.
+
+Core operations: search, upsert_project, upsert_record, get_record, list_records, upsert_link, list_links, impact, sleep_candidates, sleep_apply. Deletes only if the user explicitly asks.
+
+Slash: `/reqall status|check|context|persist|sleep|clear-dirty`
 
 ## Skills
+
+Load via `skill_view` as `reqall:reqall-context` (plugin-qualified) when needed:
 
 - `reqall-context` — initialize project and gather context
 - `reqall-document` — capture one meaningful work item

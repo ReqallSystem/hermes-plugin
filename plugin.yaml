@@ -1,9 +1,9 @@
 name: reqall
-version: 2026.8.6
+version: 2026.8.7
 description: >
   Reqall persistent semantic memory for Hermes — session context injection,
   pre-edit recall, post-work persistence nudges, SLEEP memory compression,
-  skills, and MCP.
+  skills, plugin reqall API tool, and optional host MCP.
 author: ReqallSystem
 manifest_version: 1
 requires_env:

@@ -4,7 +4,7 @@ Persistent semantic memory for [Hermes Agent](https://hermes-agent.nousresearch.
 
 Automatically retrieves project context on non-trivial turns, surfaces file-focused
 recall before edits, and nudges persistence after meaningful tool use — backed by
-the [Reqall](https://www.reqall.net) knowledge base (MCP + HTTP tools/call).
+the [Reqall](https://www.reqall.net) knowledge base (plugin HTTP client + optional host MCP).
 
 Sibling of the Claude / Codex / Grok Build Reqall plugins, adapted to Hermes’
 Python plugin surface (`register(ctx)`, hooks, skills, tools).
@@ -24,11 +24,11 @@ hermes plugins enable reqall
 Dev symlink (example profile):
 
 ```bash
-ln -sfn ~/fingerskier/hermes-plugin ~/.hermes/profiles/<profile>/plugins/reqall
+ln -sfn ~/dev/Reqall/hermes-plugin ~/.hermes/profiles/<profile>/plugins/reqall
 HERMES_HOME=~/.hermes/profiles/<profile> hermes plugins enable reqall
 ```
 
-Restart the gateway / start a **new session** so hooks load.
+Restart the gateway / start a **new session** so hooks and tools load.
 
 ## Authentication
 
@@ -42,9 +42,9 @@ REQALL_API_KEY=your-key-here
 # REQALL_PROJECT_NAME=org/repo
 ```
 
-### MCP server (recommended)
+### MCP server (optional but recommended)
 
-Add to the profile `config.yaml` so the agent can call Reqall tools natively:
+Add to the profile `config.yaml` so the host can also expose `mcp__reqall__*` tools:
 
 ```yaml
 mcp_servers:
@@ -54,9 +54,11 @@ mcp_servers:
       Authorization: "Bearer ${REQALL_API_KEY}"
 ```
 
-(Exact MCP config keys may follow your Hermes version — see `hermes mcp --help`
-and the MCP docs. The hook layer also calls `/mcp` tools/call directly with the
-same Bearer token for recall injection.)
+After enabling MCP: **restart the gateway** and use **`/new`** on long-lived chats.
+Hermes freezes the tool list for prompt caching; mid-session discovery will not
+add MCP tools to an already-open conversation.
+
+The plugin still works **without** host MCP: use the `reqall` tool (`action` + `arguments`).
 
 ## What it does
 
@@ -83,10 +85,16 @@ All handlers **fail-open** (never trap the agent).
 | `reqall-review` | Open-record review |
 | `reqall-sleep` | Compress memory (consolidate / split / compact / skip / crosslink) |
 
+Qualified name: `reqall:reqall-persist` via `skill_view`.
+
 ### Tools / slash
 
-- Tool: `reqall_status` — auth/project/session snapshot (`check_auth=true` pings API)
-- Slash: `/reqall status|check|context|persist|clear-dirty`
+| Surface | Name | Notes |
+|---------|------|--------|
+| Tool | `reqall` | `action` = MCP op (`upsert_record`, `search`, …), `arguments` = object |
+| Tool | `reqall_status` | Auth + project + dirty + **host MCP probe** |
+| Slash | `/reqall` | `status \| check \| context \| persist \| sleep \| clear-dirty` |
+| Host MCP | `mcp__reqall__*` | When `mcp_servers.reqall` connected and session tool list includes them |
 
 ## Environment
 

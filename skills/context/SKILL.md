@@ -5,7 +5,7 @@ description: Initialize project and gather relevant context from the Reqall know
 
 # Gather Context
 
-> **Hermes host:** MCP tools appear as `mcp_reqall_*` or similar once the Reqall MCP server is configured. Hooks inject recall via `pre_llm_call`. Use `/reqall status` to verify auth.
+> **Hermes host:** Prefer plugin tool `reqall` (`action` + `arguments`). Host MCP tools are named `mcp__reqall__*` (double underscore) when present in the session tool list; if missing, use `reqall` or `/new` after enabling MCP. Hooks inject recall via `pre_llm_call`. Use `/reqall status` or `reqall_status` to verify.
 
 Load project context from Reqall before starting work.
 
@@ -17,19 +17,19 @@ Load project context from Reqall before starting work.
    `git remote get-url origin` to extract the `org/repo` name, falling
    back to the directory basename only if the git command fails.
 
-2. **Ensure the project exists** — Call `reqall:upsert_project` with the
+2. **Ensure the project exists** — Call `reqall action=upsert_project` with the
    project name. Note the returned `project_id`.
 
-3. **Search for relevant context** — Call `reqall:search` with a natural
+3. **Search for relevant context** — Call `reqall action=search` with a natural
    language query derived from the user's prompt or task description. Use
    the project name as the `project_name` parameter to prioritize results
    from the current project.
 
-4. **List open records** — Call `reqall:list_records` with the `project_id`
+4. **List open records** — Call `reqall action=list_records` with the `project_id`
    and `status: "open"` to surface active issues, specs, and todos.
 
 5. **Check impact (if relevant)** — If the task involves changing an
-   existing record or component, call `reqall:impact` with the relevant
+   existing record or component, call `reqall action=impact` with the relevant
    entity to show downstream records that may be affected. Skip this step
    for new work or simple questions.
 
@@ -38,7 +38,7 @@ Load project context from Reqall before starting work.
    - Open items for this project
    - Impact analysis results (if run)
 
-   Call `reqall:get_record` for full details on any records that look
+   Call `reqall action=get_record` for full details on any records that look
    particularly relevant.
 
 ## When to Skip Steps

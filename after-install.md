@@ -1,34 +1,35 @@
-# Reqall plugin installed
-
-1. **Enable** (if you skipped `--enable`):
+# After installing the Reqall Hermes plugin
 
 ```bash
 hermes plugins enable reqall
 ```
 
-2. **Set secrets** in this profile’s `.env`:
+1. Put secrets in the active profile `.env` only:
 
 ```bash
-REQALL_API_KEY=...
+REQALL_API_KEY=…
 # REQALL_URL=https://www.reqall.net
+# REQALL_PROJECT_NAME=org/repo
 ```
 
-3. **Optional MCP** in `config.yaml` so the model can call Reqall tools directly:
+2. **Optional host MCP** in `config.yaml` (exposes `mcp__reqall__*` to the model):
 
 ```yaml
 mcp_servers:
   reqall:
-    url: "https://www.reqall.net/mcp"
+    url: https://www.reqall.net/mcp
     headers:
-      Authorization: "Bearer ${REQALL_API_KEY}"
+      Authorization: Bearer ${REQALL_API_KEY}
 ```
 
-4. **New session**, then:
+3. Restart the gateway. On long-lived chats run **`/new`** so the tool list can include MCP tools (prompt-cache freeze).
+
+4. Verify:
 
 ```text
 /reqall check
 ```
 
-Skills: `reqall-context`, `reqall-persist`, `reqall-document`, `reqall-sleep` (memory compression), …
+or tool `reqall_status` with `check_auth=true`. Confirm `mcp_host.host_mcp_registered` and/or use plugin tool `reqall` with `action=search`.
 
-Docs: https://github.com/ReqallSystem/hermes-plugin
+5. Persist without MCP: `reqall` action=`upsert_record` arguments=`{…}`.

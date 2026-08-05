@@ -5,7 +5,7 @@ description: Classify incoming issues, gather structured details, and create pri
 
 # Triage Incoming Issue
 
-> **Hermes host:** MCP tools appear as `mcp_reqall_*` or similar once the Reqall MCP server is configured. Hooks inject recall via `pre_llm_call`. Use `/reqall status` to verify auth.
+> **Hermes host:** Prefer plugin tool `reqall` (`action` + `arguments`). Host MCP tools are named `mcp__reqall__*` (double underscore) when present in the session tool list; if missing, use `reqall` or `/new` after enabling MCP. Hooks inject recall via `pre_llm_call`. Use `/reqall status` or `reqall_status` to verify.
 
 Interactively classify a new issue or request from the user, gather
 structured details, check for duplicates, and create a well-formed
@@ -38,7 +38,7 @@ Reqall record with priority.
    output is available, check the `REQALL_PROJECT_NAME` env var, then run
    `git remote get-url origin` to extract the `org/repo` name, falling
    back to the directory basename only if the git command fails. Call
-   `reqall:upsert_project` with that exact name to get the `project_id`.
+   `reqall action=upsert_project` with that exact name to get the `project_id`.
 
 2. **Get the initial description** -- Ask the user to describe their issue
    or request in their own words. If they already provided a description
@@ -85,16 +85,16 @@ Reqall record with priority.
    - Error messages or unexpected responses
    - Code snippet or configuration (if relevant)
 
-5. **Search for duplicates** -- Call `reqall:search` with a natural
+5. **Search for duplicates** -- Call `reqall action=search` with a natural
    language summary of the issue, using the `project_name` parameter.
-   Also call `reqall:list_records` with `project_id`, `kind` matching
+   Also call `reqall action=list_records` with `project_id`, `kind` matching
    the category, and `status: "open"` to scan existing open records.
 
    If potential duplicates are found:
    - Show them to the user with title and body summary
    - Ask: "Is this the same issue, related, or a new issue?"
    - If duplicate: update the existing record with new details via
-     `reqall:upsert_record` (pass its `record_id`), add a note about
+     `reqall action=upsert_record` (pass its `record_id`), add a note about
      the additional report, and stop
    - If related: proceed to create a new record and link it in step 8
 
@@ -108,7 +108,7 @@ Reqall record with priority.
    Present the proposed priority to the user and let them confirm or
    override it.
 
-7. **Create the record** -- Call `reqall:upsert_record` with:
+7. **Create the record** -- Call `reqall action=upsert_record` with:
    - `project_id` from step 1
    - `kind` from the Category Table
    - `status`: `open`
@@ -122,7 +122,7 @@ Reqall record with priority.
      - **Reporter context:** any relevant user/session context
 
 8. **Create links** -- If step 5 found related (non-duplicate) records,
-   call `reqall:upsert_link` for each:
+   call `reqall action=upsert_link` for each:
    - Bug that may be caused by an arch decision: `related`
    - Feature request that extends an existing spec: `related`
    - Bug that blocks a todo: `blocks`

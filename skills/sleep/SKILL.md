@@ -5,10 +5,7 @@ description: Compress project memory — consolidate, split, compact, skip, and 
 
 # SLEEP — compress project memory
 
-> **Hermes host:** MCP tools appear as `mcp_reqall_*` (or similar) once the
-> Reqall MCP server is configured. Prefer those tools. Use `/reqall status`
-> to verify auth. Project name: skill arg → `REQALL_PROJECT_NAME` → git
-> `org/repo` → directory basename.
+> **Hermes host:** Prefer plugin tool `reqall` (`action` + `arguments`). Host MCP tools are named `mcp__reqall__*` (double underscore) when present in the session tool list; if missing, use `reqall` or `/new` after enabling MCP. Hooks inject recall via `pre_llm_call`. Use `/reqall status` or `reqall_status` to verify.
 
 **Goal:** Preserve **knowledge** in a **minimal number of short, non-redundant records**.  
 User invoked sleep → rewrite and delete are expected. Compression is the point.  
