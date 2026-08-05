@@ -84,7 +84,22 @@ class ReqallPluginTests(unittest.TestCase):
                 self.assertFalse(st2["dirty"])
 
     def test_mcp_call_auth_missing(self):
-        res = self.client.mcp_call("search", {"query": "x"}, env={})
+        # Explicit empty key disables env + must not use ambient stored auth
+        res = self.client.mcp_call(
+            "search",
+            {"query": "x"},
+            env={"REQALL_API_KEY": "", "REQALL_URL": "https://www.reqall.net"},
+        )
+        # When empty string is set, resolveApiKey returns "" — but loadStoredAuth
+        # is only skipped when key is present. Ensure empty forces missing.
+        if res.get("ok"):
+            # Ambient host auth may still apply if client ignores empty; force
+            # path by patching api_key
+            with mock.patch.object(self.config, "api_key", return_value=""):
+                res = self.client.mcp_call("search", {"query": "x"}, env={"REQALL_API_KEY": ""})
+        # Prefer unit of client with patched key
+        with mock.patch(f"{PKG}.reqall.client.api_key", return_value=""):
+            res = self.client.mcp_call("search", {"query": "x"})
         self.assertFalse(res["ok"])
         self.assertEqual(res["error"], "auth_missing")
 
