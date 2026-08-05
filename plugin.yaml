@@ -1,5 +1,5 @@
 name: reqall
-version: 2026.8.5
+version: 2026.8.6
 description: >
   Reqall persistent semantic memory for Hermes — session context injection,
   pre-edit recall, post-work persistence nudges, SLEEP memory compression,
