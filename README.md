@@ -81,7 +81,7 @@ All handlers **fail-open** (never trap the agent).
 | `reqall-persist` | Full session persistence |
 | `reqall-triage` | Incoming issue triage |
 | `reqall-review` | Open-record review |
-| `reqall-sleep` | Graph maintenance |
+| `reqall-sleep` | Compress memory (consolidate / split / compact / skip / crosslink) |
 
 ### Tools / slash
 

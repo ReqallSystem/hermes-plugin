@@ -29,6 +29,6 @@ mcp_servers:
 /reqall check
 ```
 
-Skills: `reqall-context`, `reqall-persist`, `reqall-document`, …
+Skills: `reqall-context`, `reqall-persist`, `reqall-document`, `reqall-sleep` (memory compression), …
 
 Docs: https://github.com/ReqallSystem/hermes-plugin

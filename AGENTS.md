@@ -28,7 +28,7 @@ Plugin helper: `reqall_status` tool and `/reqall` slash command.
 - `reqall-persist` — persist all meaningful session outcomes
 - `reqall-triage` — classify incoming issues
 - `reqall-review` — review open records
-- `reqall-sleep` — knowledge-graph maintenance
+- `reqall-sleep` — compress memory (consolidate / split / compact / skip / crosslink)
 
 ## Hermes hooks (automatic)
 

@@ -69,8 +69,8 @@ def register(ctx) -> None:
     ctx.register_command(
         name="reqall",
         handler=_slash_reqall,
-        description="Reqall memory: status | context | persist | clear-dirty",
-        args_hint="status | context | persist | clear-dirty",
+        description="Reqall memory: status | context | persist | sleep | clear-dirty",
+        args_hint="status | context | persist | sleep [org/repo] | clear-dirty",
     )
 
     for name, rel in SKILLS:
@@ -109,7 +109,9 @@ def _handle_status(args: dict, **kwargs) -> str:
 
 def _slash_reqall(raw_args: str) -> str:
     text = (raw_args or "").strip()
-    verb = (text.split() or ["status"])[0].lower()
+    parts = text.split(None, 1)
+    verb = (parts[0] if parts else "status").lower()
+    rest = parts[1].strip() if len(parts) > 1 else ""
     if verb in {"", "status", "info"}:
         return _handle_status({"check_auth": False})
     if verb in {"ping", "check"}:
@@ -129,7 +131,15 @@ def _slash_reqall(raw_args: str) -> str:
             "Run skill **reqall-persist** now: classify session work and "
             "upsert_record / upsert_link. Dirty flag cleared so the nudge resets."
         )
+    if verb == "sleep":
+        proj = rest or "(current project)"
+        return (
+            f"Run skill **reqall-sleep** for project `{proj}`.\n"
+            "SLEEP compresses memory: consolidate · split · compact · skip · crosslink.\n"
+            "User invoked sleep → rewrite/delete expected. Use decision table in the skill.\n"
+            "MCP: sleep_candidates(project_id) → select ops → one sleep_apply batch."
+        )
     return (
-        "Usage: /reqall status | check | context | persist | clear-dirty\n"
-        "MCP: configure reqall server at ${REQALL_URL}/mcp with Bearer REQALL_API_KEY."
+        "Usage: /reqall status | check | context | persist | sleep [org/repo] | clear-dirty\n"
+        "MCP: reqall server at ${REQALL_URL}/mcp with Bearer token."
     )
