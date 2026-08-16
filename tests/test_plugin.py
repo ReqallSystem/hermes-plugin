@@ -110,7 +110,8 @@ class ReqallPluginTests(unittest.TestCase):
                 if not path.exists():
                     raise FileNotFoundError(path)
 
-        self.pkg.register(Ctx())
+        with mock.patch.dict("os.environ", {"REQALL_SKIP_PROFILE_SYNC": "1", "HOME": "/tmp"}):
+            self.pkg.register(Ctx())
         self.assertGreaterEqual(len(skill_calls), 6)
         for name, path, desc in skill_calls:
             self.assertIsInstance(path, Path, msg=f"{name} got {type(path)}")
@@ -133,7 +134,8 @@ class ReqallPluginTests(unittest.TestCase):
             def register_skill(self, name, path, description=""):
                 calls.append(("skill", name, type(path).__name__))
 
-        self.pkg.register(Ctx())
+        with mock.patch.dict("os.environ", {"REQALL_SKIP_PROFILE_SYNC": "1", "HOME": "/tmp"}):
+            self.pkg.register(Ctx())
         kinds = {c[0] for c in calls}
         self.assertIn("hook", kinds)
         self.assertIn("tool", kinds)
@@ -141,6 +143,7 @@ class ReqallPluginTests(unittest.TestCase):
         self.assertIn("skill", kinds)
         self.assertIn(("tool", "reqall_status"), calls)
         self.assertIn(("tool", "reqall"), calls)
+        self.assertIn(("tool", "reqall_skill"), calls)
         skill_types = {c[2] for c in calls if c[0] == "skill"}
         self.assertEqual(skill_types, {"PosixPath"} | skill_types)  # Path
         self.assertTrue(all(c[2] == "PosixPath" or c[2] == "WindowsPath" or c[2] == "Path" or "Path" in c[2] for c in calls if c[0] == "skill"))
@@ -187,17 +190,95 @@ class ReqallPluginTests(unittest.TestCase):
             },
         ):
             with mock.patch(f"{PKG}.api_key", return_value=""):
-                payload = json.loads(self.pkg._handle_status({}))
+                with mock.patch(f"{PKG}.missing_enabled_homes", return_value=[]):
+                    payload = json.loads(self.pkg._handle_status({}))
         self.assertIn("mcp_host", payload)
         self.assertIn("warning", payload)
         self.assertEqual(payload["mcp_tool_name_example"], "mcp__reqall__upsert_record")
         self.assertEqual(payload["plugin_api_tool"], "reqall")
+        self.assertTrue(payload["plugin_loaded"])
 
     def test_probe_mcp_host_offline(self):
         snap = self.mcp_status.probe_mcp_host()
         self.assertIn("host_mcp_registered", snap)
         self.assertIn("session_guidance", snap)
         self.assertIn("mcp__reqall__", self.mcp_status.NAME_ALIASES_NOTE)
+
+    def test_api_key_accepts_mcp_alias(self):
+        self.assertEqual(
+            self.config.api_key({"MCP_REQALL_API_KEY": "mcp-secret-key"}),
+            "mcp-secret-key",
+        )
+        self.assertEqual(
+            self.config.api_key_source({"MCP_REQALL_API_KEY": "mcp-secret-key"}),
+            "MCP_REQALL_API_KEY",
+        )
+        self.assertEqual(
+            self.config.api_key(
+                {"REQALL_API_KEY": "preferred", "MCP_REQALL_API_KEY": "other"}
+            ),
+            "preferred",
+        )
+
+    def test_mcp_name_case_insensitive(self):
+        matched = self.mcp_status.match_expected(
+            ["mcp__Reqall__search", "mcp__Reqall__upsert_record", "reqall"]
+        )
+        self.assertIn("mcp__reqall__search", matched["expected_mcp_tools_present"])
+        self.assertIn("mcp__Reqall__search", matched["actual_mcp_tool_names"])
+        self.assertNotIn("mcp__reqall__search", matched["expected_mcp_tools_missing"])
+        self.assertIn("mcp__reqall__list_records", matched["expected_mcp_tools_missing"])
+
+    def test_skills_host_probe_missing_skill_view(self):
+        hit = self.mcp_status.skills_host_probe(["reqall", "reqall_status"])
+        self.assertFalse(hit["skill_view_available"])
+        self.assertIn("reqall_skill", hit["hint"])
+
+    def test_reqall_skill_dumps_body(self):
+        out = json.loads(self.pkg._handle_reqall_skill({"name": "persist"}))
+        self.assertTrue(out["ok"])
+        self.assertEqual(out["name"], "reqall-persist")
+        self.assertIn("Classify the work", out["body"])
+
+    def test_slash_persist_dumps_skill(self):
+        text = self.pkg._slash_reqall("persist")
+        self.assertIn("reqall-persist", text)
+        self.assertIn("Classify the work", text)
+
+    def test_profile_install_symlink(self):
+        homes_mod = importlib.import_module(f"{PKG}.reqall.homes")
+        install_mod = importlib.import_module(f"{PKG}.reqall.install")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / ".hermes"
+            profile = root / "profiles" / "steward"
+            profile.mkdir(parents=True)
+            (profile / "config.yaml").write_text(
+                "plugins:\n  enabled:\n    - reqall\n",
+                encoding="utf-8",
+            )
+            env = {"HOME": tmp, "HERMES_HOME": str(profile)}
+            missing = homes_mod.missing_enabled_homes(env=env)
+            self.assertEqual(len(missing), 1)
+            self.assertEqual(missing[0]["name"], "steward")
+            result = install_mod.ensure_installs(ROOT, apply=True, env=env)
+            self.assertGreaterEqual(result["linked"], 1)
+            dest = profile / "plugins" / "reqall"
+            self.assertTrue(dest.is_symlink() or (dest / "plugin.yaml").is_file())
+            self.assertTrue((dest / "plugin.yaml").is_file())
+            again = install_mod.ensure_installs(ROOT, apply=True, env=env)
+            self.assertEqual(again["linked"], 0)
+            self.assertFalse(homes_mod.missing_enabled_homes(env=env))
+
+    def test_profile_install_skips_existing(self):
+        install_mod = importlib.import_module(f"{PKG}.reqall.install")
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            dest = home / "plugins" / "reqall"
+            dest.mkdir(parents=True)
+            (dest / "plugin.yaml").write_text("name: other\n", encoding="utf-8")
+            out = install_mod.link_into(home, ROOT)
+            self.assertEqual(out["action"], "skipped_existing")
+            self.assertEqual((dest / "plugin.yaml").read_text(encoding="utf-8"), "name: other\n")
 
 
 if __name__ == "__main__":

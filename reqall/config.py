@@ -11,6 +11,13 @@ DEFAULT_URL = "https://www.reqall.net"
 DEFAULT_DOC_INTERVAL_MIN = 10
 DEFAULT_PERSIST_INTERVAL_MIN = 30
 
+# Hermes host MCP often interpolates a separate env name in config.yaml.
+API_KEY_ENVS = (
+    "REQALL_API_KEY",
+    "MCP_REQALL_API_KEY",
+    "REQALL_MCP_API_KEY",
+)
+
 
 def api_url(env: Dict[str, str] | None = None) -> str:
     e = env if env is not None else os.environ
@@ -19,13 +26,33 @@ def api_url(env: Dict[str, str] | None = None) -> str:
 
 
 def api_key(env: Dict[str, str] | None = None) -> str:
+    """Return the first non-empty Reqall bearer token.
+
+    Accepts REQALL_API_KEY (preferred) and the MCP-template aliases
+    MCP_REQALL_API_KEY / REQALL_MCP_API_KEY so hook HTTP and host MCP
+    can share one secret under either name.
+    """
     e = env if env is not None else os.environ
-    if "REQALL_API_KEY" in e:
-        return (e.get("REQALL_API_KEY") or "").strip()
+    for name in API_KEY_ENVS:
+        val = (e.get(name) or "").strip()
+        if val:
+            return val
     # Optional shared CLI auth file (parity with other Reqall plugins)
     cfg = _load_stored_auth()
     token = cfg.get("access_token") or cfg.get("api_key") or ""
     return str(token).strip()
+
+
+def api_key_source(env: Dict[str, str] | None = None) -> str:
+    """Which lookup produced the token (for status / docs)."""
+    e = env if env is not None else os.environ
+    for name in API_KEY_ENVS:
+        if (e.get(name) or "").strip():
+            return name
+    cfg = _load_stored_auth()
+    if cfg.get("access_token") or cfg.get("api_key"):
+        return "stored_auth"
+    return "missing"
 
 
 def project_name_override(env: Dict[str, str] | None = None) -> str:

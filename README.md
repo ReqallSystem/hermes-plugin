@@ -17,26 +17,48 @@ hermes plugins install ReqallSystem/hermes-plugin --enable
 hermes plugins install /path/to/hermes-plugin --enable
 ```
 
+Hermes copies the plugin into **the current `$HERMES_HOME/plugins/reqall`**.
+Named profiles (`~/.hermes/profiles/<name>`) are separate homes. Listing
+`reqall` in that profile’s `plugins.enabled` does **not** load the default-home
+checkout.
+
+After install, sync into every profile that already enabled the plugin:
+
 ```bash
-hermes plugins enable reqall
+python3 /path/to/plugins/reqall/ensure-install.py
+# or, once any session has the plugin loaded:
+# /reqall ensure-install
 ```
 
-Dev symlink (example profile):
+That creates `$HERMES_HOME/plugins/reqall` as a symlink to this tree. It never
+overwrites an existing checkout. Opt out of the automatic `register()` sync
+with `REQALL_SKIP_PROFILE_SYNC=1`.
+
+Per-profile install (equivalent):
+
+```bash
+HERMES_HOME=~/.hermes/profiles/<profile> hermes plugins install ReqallSystem/hermes-plugin --enable
+```
+
+Dev symlink:
 
 ```bash
 ln -sfn ~/dev/Reqall/hermes-plugin ~/.hermes/profiles/<profile>/plugins/reqall
 HERMES_HOME=~/.hermes/profiles/<profile> hermes plugins enable reqall
 ```
 
-Restart the gateway / start a **new session** so hooks and tools load.
+Restart **that profile’s** gateway from an **external** shell, then `/new` on
+long-lived chats so hooks and tools load.
 
 ## Authentication
 
 1. Create an API key at [reqall.net](https://www.reqall.net)
-2. Set in the active profile `.env` (secrets only):
+2. Set in the **active profile** `.env` (secrets only). Any one of:
 
 ```bash
 REQALL_API_KEY=your-key-here
+# MCP_REQALL_API_KEY=your-key-here
+# REQALL_MCP_API_KEY=your-key-here
 # optional:
 # REQALL_URL=https://www.reqall.net
 # REQALL_PROJECT_NAME=org/repo
@@ -44,7 +66,9 @@ REQALL_API_KEY=your-key-here
 
 ### MCP server (optional but recommended)
 
-Add to the profile `config.yaml` so the host can also expose `mcp__reqall__*` tools:
+Add to the **same profile** `config.yaml`. The config key’s case becomes the
+Hermes tool prefix (`reqall` → `mcp__reqall__*`, `Reqall` → `mcp__Reqall__*`).
+The plugin treats those names as equivalent.
 
 ```yaml
 mcp_servers:
@@ -52,9 +76,10 @@ mcp_servers:
     url: "https://www.reqall.net/mcp"
     headers:
       Authorization: "Bearer ${REQALL_API_KEY}"
+      # or ${MCP_REQALL_API_KEY}
 ```
 
-After enabling MCP: **restart the gateway** and use **`/new`** on long-lived chats.
+After enabling MCP: **restart the gateway** (external shell) and **`/new`**.
 Hermes freezes the tool list for prompt caching; mid-session discovery will not
 add MCP tools to an already-open conversation.
 
@@ -85,26 +110,35 @@ All handlers **fail-open** (never trap the agent).
 | `reqall-review` | Open-record review |
 | `reqall-sleep` | Compress memory (consolidate / split / compact / skip / crosslink) |
 
-Qualified name: `reqall:reqall-persist` via `skill_view`.
+Qualified name: `reqall:reqall-persist` via `skill_view` when that toolset is
+enabled. If the host disabled `skills`, use plugin tool `reqall_skill` or
+`/reqall persist` (dumps the skill markdown).
 
 ### Tools / slash
 
 | Surface | Name | Notes |
 |---------|------|--------|
 | Tool | `reqall` | `action` = MCP op (`upsert_record`, `search`, …), `arguments` = object |
-| Tool | `reqall_status` | Auth + project + dirty + **host MCP probe** |
-| Slash | `/reqall` | `status \| check \| context \| persist \| sleep \| clear-dirty` |
-| Host MCP | `mcp__reqall__*` | When `mcp_servers.reqall` connected and session tool list includes them |
+| Tool | `reqall_status` | Auth + project + dirty + MCP probe + **profile-install gaps** |
+| Tool | `reqall_skill` | Return a bundled skill body without `skill_view` |
+| Slash | `/reqall` | `status \| check \| context \| persist \| sleep \| ensure-install \| clear-dirty` |
+| Host MCP | `mcp__reqall__*` / `mcp__Reqall__*` | When `mcp_servers.reqall` (any case) is connected |
 
 ## Environment
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `REQALL_API_KEY` | required | Bearer token |
+| `REQALL_API_KEY` | required* | Bearer token |
+| `MCP_REQALL_API_KEY` | — | Alias accepted by the plugin HTTP client |
+| `REQALL_MCP_API_KEY` | — | Alias accepted by the plugin HTTP client |
 | `REQALL_URL` | `https://www.reqall.net` | API base |
 | `REQALL_PROJECT_NAME` | auto | Override project id string |
 | `REQALL_DOC_INTERVAL_MIN` | `10` | Min minutes between document nudges (`0` = every time) |
 | `REQALL_PERSIST_INTERVAL_MIN` | `30` | Min minutes between persist nudges |
+| `REQALL_SKIP_PROFILE_SYNC` | unset | Set `1` to disable automatic sibling-profile symlinks on `register()` |
+
+\*One of `REQALL_API_KEY` / `MCP_REQALL_API_KEY` / `REQALL_MCP_API_KEY` (or the
+shared Reqall CLI auth file) must be set.
 
 ## Development
 

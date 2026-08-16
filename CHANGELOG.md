@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026.8.8
+
+- **Fix:** Hermes profiles are separate `$HERMES_HOME`s. Enabling `reqall` in
+  a profile config does not load `~/.hermes/plugins/reqall`. The plugin now
+  diagnoses every home, can symlink itself into enabled-but-empty profiles
+  (`python3 ensure-install.py`, `/reqall ensure-install`, or automatic
+  fail-open sync on `register()`), and reports gaps from `reqall_status`.
+- **Fix:** Host MCP probe matches `mcp__reqall__*` case-insensitively
+  (`mcp_servers.Reqall` → `mcp__Reqall__search` is no longer “missing”).
+- **Fix:** Auth accepts `REQALL_API_KEY`, `MCP_REQALL_API_KEY`, and
+  `REQALL_MCP_API_KEY` so hook HTTP and host MCP can share one secret.
+- **Fix:** Skills remain usable when the host `skills` toolset is disabled:
+  new `reqall_skill` tool; `/reqall persist|context|sleep|…` dumps the
+  skill body instead of telling the agent to call `skill_view`.
+- **Docs:** README / after-install / AGENTS — per-profile install, key
+  aliases, MCP name case.
+
 ## 2026.8.7
 
 - **Fix:** `register_skill` now passes `pathlib.Path` (not `str`). Hermes calls
