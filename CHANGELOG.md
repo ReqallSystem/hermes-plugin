@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026.8.9
+
+- **Fix:** Project binding no longer treats `$HOME` / `ubuntu` / `src` /
+  `workspace` as a Reqall project. Hooks search unbound (cross-project) and
+  **do not** `upsert_project` until there is an override, git `org/repo`, or
+  an org/repo mention in the prompt. `/reqall check` pings via `list_projects`
+  when unbound.
+- **Fix:** `pre_llm_call` full recall requires work-like language, not merely
+  a long message. `pre_tool_call` searches a conceptual query (basename +
+  task), not the raw filesystem path.
+- **Feat:** Hermes persist gate — `pre_verify` continues once when the session
+  is dirty / has `changed_paths`. `on_session_finalize` logs leftover dirty
+  work (Slack threads rarely end).
+- **Feat:** Skills know `info` + `work` and SLEEP `work_review` /
+  `promote` / `discard`. Persist prefers durable kinds.
+
 ## 2026.8.8
 
 - **Fix:** Hermes profiles are separate `$HERMES_HOME`s. Enabling `reqall` in

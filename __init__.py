@@ -12,14 +12,16 @@ from .reqall.config import api_key, api_key_source, api_url
 from .reqall.homes import format_install_hint, missing_enabled_homes
 from .reqall.hooks import (
     on_session_end,
+    on_session_finalize,
     on_session_start,
     post_tool_call,
     pre_llm_call,
     pre_tool_call,
+    pre_verify,
 )
 from .reqall.install import ensure_installs, skip_sync
 from .reqall.mcp_status import probe_mcp_host
-from .reqall.project import resolve_project_name
+from .reqall.project import bind_project
 
 logger = logging.getLogger(__name__)
 PLUGIN_ROOT = Path(__file__).resolve().parent
@@ -57,7 +59,9 @@ def register(ctx) -> None:
     ctx.register_hook("pre_llm_call", pre_llm_call)
     ctx.register_hook("pre_tool_call", pre_tool_call)
     ctx.register_hook("post_tool_call", post_tool_call)
+    ctx.register_hook("pre_verify", pre_verify)
     ctx.register_hook("on_session_end", on_session_end)
+    ctx.register_hook("on_session_finalize", on_session_finalize)
 
     ctx.register_tool(
         name="reqall_status",
@@ -264,7 +268,8 @@ def _handle_reqall_skill(args: dict, **kwargs) -> str:
 def _handle_status(args: dict, **kwargs) -> str:
     del kwargs
     cwd = args.get("cwd")
-    project = resolve_project_name(cwd if isinstance(cwd, str) else None)
+    binding = bind_project(cwd=cwd if isinstance(cwd, str) else None)
+    project = binding.name or ""
     key = api_key()
     mcp = probe_mcp_host()
     warnings: List[str] = []
@@ -276,7 +281,8 @@ def _handle_status(args: dict, **kwargs) -> str:
         "auth_configured": bool(key),
         "auth_source": api_key_source(),
         "auth_preview": (key[:4] + "…" + key[-4:]) if key and len(key) > 10 else bool(key),
-        "project_name": project,
+        "project_name": project or None,
+        "project_binding": binding.as_dict(),
         "mcp_url": f"{api_url()}/mcp",
         "mcp_tool_name_example": "mcp__reqall__upsert_record",
         "plugin_api_tool": "reqall",
@@ -312,8 +318,14 @@ def _handle_status(args: dict, **kwargs) -> str:
     if args.get("check_auth"):
         if not key:
             payload["auth_check"] = {"ok": False, "error": "auth_missing"}
-        else:
+        elif binding.safe_to_upsert and project:
             payload["auth_check"] = client.upsert_project(project)
+        else:
+            payload["auth_check"] = client.mcp_call("list_projects", {"limit": 1})
+            payload["auth_check_note"] = (
+                "Skipped upsert_project because the cwd is not a bound "
+                "Reqall project. Used list_projects as an auth ping."
+            )
     if warnings:
         payload["warning"] = " ".join(warnings)
         payload["warnings"] = warnings

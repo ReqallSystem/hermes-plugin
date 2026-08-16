@@ -5,56 +5,45 @@ description: Initialize project and gather relevant context from the Reqall know
 
 # Gather Context
 
-> **Hermes host:** Prefer plugin tool `reqall` (`action` + `arguments`). Host MCP tools are named `mcp__reqall__*` (double underscore) when present in the session tool list; if missing, use `reqall` or `/new` after enabling MCP. Hooks inject recall via `pre_llm_call`. Use `/reqall status` or `reqall_status` to verify.
+> **Hermes host:** Prefer plugin tool `reqall` (`action` + `arguments`). Host MCP: `mcp__reqall__*` / `mcp__Reqall__*`. `reqall_skill` / `/reqall context` if `skill_view` is off.
 
 Load project context from Reqall before starting work.
 
 ## Steps
 
-1. **Identify the project** — Use the project name provided by the hook
-   output (look for `project_name=...` in the hook message). If no hook
-   output is available, check the `REQALL_PROJECT_NAME` env var, then run
-   `git remote get-url origin` to extract the `org/repo` name, falling
-   back to the directory basename only if the git command fails.
+1. **Identify the project** — Hook `project_name` / `project_binding` when
+   `safe_to_upsert`. Else `REQALL_PROJECT_NAME`, then git `org/repo`.
+   **Never** treat `$HOME`, `ubuntu`, `src`, or `workspace` as a project.
+   If unbound, skip upsert and search across projects (step 3 only).
 
-2. **Ensure the project exists** — Call `reqall action=upsert_project` with the
-   project name. Note the returned `project_id`.
+2. **Ensure the project exists** — Only if bound: `reqall action=upsert_project`
+   → `project_id`.
 
-3. **Search for relevant context** — Call `reqall action=search` with a natural
-   language query derived from the user's prompt or task description. Use
-   the project name as the `project_name` parameter to prioritize results
-   from the current project.
+3. **Search** — `reqall action=search` with a *conceptual* query from the user
+   task (not a raw filesystem path). Pass `project_name` only when bound.
 
-4. **List open records** — Call `reqall action=list_records` with the `project_id`
-   and `status: "open"` to surface active issues, specs, and todos.
+4. **List open records** — If you have a real `project_id`,
+   `reqall action=list_records` with `status: "open"`.
 
-5. **Check impact (if relevant)** — If the task involves changing an
-   existing record or component, call `reqall action=impact` with the relevant
-   entity to show downstream records that may be affected. Skip this step
-   for new work or simple questions.
+5. **Impact** — If changing an existing tracked record, `reqall action=impact`.
 
-6. **Present context** — Summarize findings concisely:
-   - Relevant records from search
-   - Open items for this project
-   - Impact analysis results (if run)
-
-   Call `reqall action=get_record` for full details on any records that look
-   particularly relevant.
+6. **Present context** — Search hits, open items, impact. `get_record` for
+   the few that matter.
 
 ## When to Skip Steps
 
-- Simple question or chat (no coding task): only run step 3 (search).
-- Search returns nothing: say so and proceed — the project may be new.
+- Simple question: only search (step 3).
+- Unbound project: do not upsert; search only.
+- Search empty: say so and proceed.
 - No open records: skip step 4 output.
 
 ## Automatic Hooks
 
-On Grok Build, lifecycle hooks already:
+Hermes hooks already:
 
-1. **UserPromptSubmit** — call `upsert_project` + semantic `search` + open
-   `list_records` and inject results as additional context.
-2. **PreToolUse** — path/command-focused search before file edits and
-   mutating shell commands.
+1. **pre_llm_call** — search (and upsert + open list only when the project is
+   bound). Generic home directories stay unbound.
+2. **pre_tool_call** — conceptual query from the edited file, not the raw path.
+3. **pre_verify** — one persist continue when the session is dirty.
 
-Use this skill when you need a deeper manual pass (impact analysis, full
-record bodies) beyond what the hooks injected.
+Use this skill for a deeper pass (impact, full bodies) beyond hook injection.

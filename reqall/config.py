@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Mapping
 
 DEFAULT_URL = "https://www.reqall.net"
 DEFAULT_DOC_INTERVAL_MIN = 10
@@ -55,7 +55,7 @@ def api_key_source(env: Dict[str, str] | None = None) -> str:
     return "missing"
 
 
-def project_name_override(env: Dict[str, str] | None = None) -> str:
+def project_name_override(env: Mapping[str, str] | None = None) -> str:
     e = env if env is not None else os.environ
     return (e.get("REQALL_PROJECT_NAME") or "").strip()
 
