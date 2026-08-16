@@ -280,6 +280,70 @@ class ReqallPluginTests(unittest.TestCase):
             self.assertEqual(out["action"], "skipped_existing")
             self.assertEqual((dest / "plugin.yaml").read_text(encoding="utf-8"), "name: other\n")
 
+    def test_generic_cwd_is_unbound(self):
+        binding = self.project.bind_project(cwd="/tmp", env={})
+        self.assertFalse(binding.safe_to_upsert)
+        self.assertIsNone(binding.name)
+        self.assertEqual(self.project.resolve_project_name("/tmp", env={}), "")
+
+    def test_prompt_org_repo_binds(self):
+        binding = self.project.bind_project(
+            cwd="/home/ubuntu",
+            prompt="Look at fingerskier/zeus Dexie Cloud leftovers",
+            env={},
+        )
+        self.assertTrue(binding.safe_to_upsert)
+        self.assertEqual(binding.name, "fingerskier/zeus")
+        self.assertEqual(binding.source, "prompt")
+
+    def test_extract_skips_mime(self):
+        self.assertIsNone(self.project.extract_project_hint("see text/plain output"))
+
+    def test_conceptual_query_drops_raw_path(self):
+        q = self.project.conceptual_query(
+            "/home/ubuntu/project/Reqall/hermes-plugin/reqall/hooks.py",
+            "persist gate",
+        )
+        self.assertNotIn("/home/ubuntu", q)
+        self.assertIn("hooks", q)
+        self.assertIn("persist gate", q)
+
+    def test_long_chat_is_not_nontrivial(self):
+        self.assertFalse(
+            self.hooks.is_nontrivial_prompt(
+                "what do you think about the weather this week and also lunch"
+            )
+        )
+
+    def test_pre_verify_continues_when_dirty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.dict("os.environ", {"HERMES_HOME": tmp}):
+                sid = "verify-sess"
+                self.state.mark_dirty(sid, "src/app.py")
+                out = self.hooks.pre_verify(session_id=sid, changed_paths=["src/app.py"])
+                self.assertIsInstance(out, dict)
+                self.assertEqual(out.get("action"), "continue")
+                again = self.hooks.pre_verify(session_id=sid, changed_paths=["src/app.py"])
+                self.assertIsNone(again)
+
+    def test_pre_llm_does_not_upsert_unbound(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.dict("os.environ", {"HERMES_HOME": tmp}):
+                with mock.patch(
+                    f"{PKG}.reqall.client.upsert_project",
+                    return_value={"ok": True, "data": {"id": 1}},
+                ) as up:
+                    with mock.patch(
+                        f"{PKG}.reqall.client.search",
+                        return_value={"ok": True, "text": "[]"},
+                    ):
+                        self.hooks.pre_llm_call(
+                            session_id="unbound-sess",
+                            user_message="please implement the auth fix",
+                            cwd="/tmp",
+                        )
+                up.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

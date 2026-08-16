@@ -91,11 +91,12 @@ The plugin still works **without** host MCP: use the `reqall` tool (`action` + `
 
 | Event | Behavior |
 |-------|----------|
-| `on_session_start` | Resolve project name (`REQALL_PROJECT_NAME` → git `org/repo` → cwd) |
-| `pre_llm_call` | Non-trivial prompts: `upsert_project` + `search` + open `list_records`, inject as context; dirty-session **persist nudge** |
-| `pre_tool_call` | Before `write_file` / `patch` / mutating `terminal`: path-focused search |
-| `post_tool_call` | Mark dirty; throttled **document** nudge |
-| `on_session_end` | Log remaining dirty work |
+| `on_session_start` | Bind project (`REQALL_PROJECT_NAME` → git `org/repo` → prompt hint). Generic home dirs stay **unbound** |
+| `pre_llm_call` | Work-like prompts: search (upsert + open list only when bound); dirty-session persist nudge |
+| `pre_tool_call` | Before mutations: conceptual search (not the raw path) |
+| `post_tool_call` | Mark dirty; throttled document nudge |
+| `pre_verify` | If dirty / `changed_paths`, continue once so persist can run |
+| `on_session_end` / `on_session_finalize` | Log remaining dirty work |
 
 All handlers **fail-open** (never trap the agent).
 
@@ -108,7 +109,7 @@ All handlers **fail-open** (never trap the agent).
 | `reqall-persist` | Full session persistence |
 | `reqall-triage` | Incoming issue triage |
 | `reqall-review` | Open-record review |
-| `reqall-sleep` | Compress memory (consolidate / split / compact / skip / crosslink) |
+| `reqall-sleep` | Compress memory (consolidate / split / compact / skip / crosslink / promote / discard) |
 
 Qualified name: `reqall:reqall-persist` via `skill_view` when that toolset is
 enabled. If the host disabled `skills`, use plugin tool `reqall_skill` or
