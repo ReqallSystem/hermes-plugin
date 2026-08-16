@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026.8.10
+
+- **Fix:** Streamable-HTTP SSE client reads every `data:` frame and selects
+  the JSON-RPC result matching the request id (no longer the first event).
+- **Feat:** Behavioral knobs via Hermes `plugins.entries.reqall.settings`
+  (`project_name`, `doc_interval_min`, `persist_interval_min`,
+  `skip_profile_sync`). Env vars still override.
+- **Feat:** Plugin `reqall` actions include `share_project`, `revoke_share`,
+  `delete_project`, `list_prompts`, `get_prompt`. `/reqall prompt [name]`
+  loads server prompts. Deletes/share still require an explicit user ask.
+
 ## 2026.8.9
 
 - **Fix:** Project binding no longer treats `$HOME` / `ubuntu` / `src` /

@@ -344,6 +344,38 @@ class ReqallPluginTests(unittest.TestCase):
                         )
                 up.assert_not_called()
 
+    def test_sse_skips_leading_frames(self):
+        raw = (
+            "event: endpoint\n"
+            "data: /mcp\n"
+            "\n"
+            "data: {\"jsonrpc\":\"2.0\",\"id\":\"abc\",\"result\":{\"content\":"
+            "[{\"type\":\"text\",\"text\":\"ok\"}]}}\n"
+            "\n"
+        )
+        payload = self.client.parse_sse_jsonrpc(raw, "abc")
+        self.assertEqual(payload["id"], "abc")
+        self.assertIn("result", payload)
+
+    def test_settings_env_overrides_cache(self):
+        self.config.load_plugin_settings({"project_name": "from/config", "doc_interval_min": 99})
+        try:
+            self.assertEqual(
+                self.project.resolve_project_name("/tmp", env={}),
+                "from/config",
+            )
+            self.assertEqual(self.config.doc_interval_min({}), 99)
+            self.assertEqual(
+                self.config.doc_interval_min({"REQALL_DOC_INTERVAL_MIN": "3"}),
+                3.0,
+            )
+        finally:
+            self.config.load_plugin_settings({})
+
+    def test_share_and_prompt_actions_allowed(self):
+        for action in ("share_project", "get_prompt", "delete_project"):
+            self.assertIn(action, self.pkg.REQALL_ACTIONS)
+
 
 if __name__ == "__main__":
     unittest.main()

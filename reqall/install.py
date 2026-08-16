@@ -22,6 +22,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional
 
+from .config import skip_profile_sync
 from .homes import diagnose_homes, plugin_dir
 
 
@@ -30,14 +31,7 @@ def plugin_root() -> Path:
 
 
 def skip_sync(env: Optional[Mapping[str, str]] = None) -> bool:
-    e = env if env is not None else os.environ
-    return (e.get("REQALL_SKIP_PROFILE_SYNC") or "").strip() in {
-        "1",
-        "true",
-        "TRUE",
-        "yes",
-        "YES",
-    }
+    return skip_profile_sync(env)
 
 
 def _same_tree(left: Path, right: Path) -> bool:

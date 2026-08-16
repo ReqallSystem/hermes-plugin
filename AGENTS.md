@@ -11,81 +11,69 @@ Do this automatically. Do not wait for the user to ask.
 
 ### Preferred (always available when plugin is enabled)
 
-Plugin tools (no host MCP injection required):
-
 | Tool | Purpose |
 |------|---------|
 | `reqall` | Call Reqall API: `action` = MCP tool name, `arguments` = object |
-| `reqall_status` | Auth, project, dirty flag, host MCP probe |
-
-Example:
+| `reqall_status` | Auth, project binding, dirty flag, MCP probe, profile-install gaps |
+| `reqall_skill` | Dump a bundled skill when host `skill_view` is unavailable |
 
 ```text
 reqall action=upsert_record arguments={project_id, kind, title, body, status}
 reqall action=search arguments={query, project_name?, limit?}
-reqall action=upsert_link arguments={source_id, source_table, target_id, target_table, relationship}
+reqall_skill name=reqall-persist
 ```
 
-### Host MCP (when configured and visible in this session)
+Deletes, `share_project`, `revoke_share`, and `delete_project` only if the user explicitly asked.
 
-Configure `mcp_servers.reqall` in Hermes config. Hermes names tools:
+### Host MCP
 
-```text
-mcp__reqall__search
-mcp__reqall__upsert_project
-mcp__reqall__upsert_record
-mcp__reqall__get_record
-mcp__reqall__list_records
-mcp__reqall__upsert_link
-mcp__reqall__list_links
-mcp__reqall__impact
-mcp__reqall__sleep_candidates
-mcp__reqall__sleep_apply
-```
+`mcp_servers.reqall` or `mcp_servers.Reqall` → `mcp__reqall__*` / `mcp__Reqall__*` (same ops, any case). If MCP was enabled mid-chat, tools may be missing until `/new`. Prefer plugin `reqall` when unsure.
 
-**Not** `mcp_reqall_*` (single underscore). If MCP was enabled after this chat started, tools may be missing until **`/new`** (prompt-cache tool freeze). Prefer plugin `reqall` when unsure.
+Auth: `REQALL_API_KEY` or `MCP_REQALL_API_KEY`.
 
-Core operations: search, upsert_project, upsert_record, get_record, list_records, upsert_link, list_links, impact, sleep_candidates, sleep_apply. Deletes only if the user explicitly asks.
+Slash: `/reqall status|check|context|persist|sleep|prompt|ensure-install|clear-dirty`
 
-Slash: `/reqall status|check|context|persist|sleep|clear-dirty`
+If `reqall` / `reqall_status` are missing, this `$HERMES_HOME` does not have plugin files. Run `python3 ensure-install.py`, restart that profile’s gateway from an **external** shell, `/new`.
+
+## Project binding
+
+Never `upsert_project` from `$HOME`, `ubuntu`, `src`, or `workspace`.
+
+Order: `REQALL_PROJECT_NAME` / `plugins.entries.reqall.settings.project_name` → git `org/repo` → `org/repo` mention in the prompt → **unbound** (cross-project search only).
 
 ## Skills
 
-Load via `skill_view` as `reqall:reqall-context` (plugin-qualified) when needed:
+`skill_view` as `reqall:reqall-persist` when the skills toolset is on. Otherwise `reqall_skill` or `/reqall persist`:
 
-- `reqall-context` — initialize project and gather context
-- `reqall-document` — capture one meaningful work item
-- `reqall-persist` — persist all meaningful session outcomes
-- `reqall-triage` — classify incoming issues
-- `reqall-review` — review open records
-- `reqall-sleep` — compress memory (consolidate / split / compact / skip / crosslink)
+- `reqall-context` — gather context
+- `reqall-document` — one work item
+- `reqall-persist` — session outcomes
+- `reqall-triage` / `reqall-review`
+- `reqall-sleep` — consolidate / split / compact / skip / crosslink / **promote** / **discard**
 
-## Hermes hooks (automatic)
+`/reqall prompt [name]` loads the **server** persist/how-to prompts when you need the live table.
+
+## Hooks
 
 | Hook | Behavior |
 |------|----------|
-| `on_session_start` | Resolve `project_name` |
-| `pre_llm_call` | Non-trivial turns: upsert project + search + open records → inject context; dirty sessions get a persist nudge |
-| `pre_tool_call` | Path/command-focused search before file/shell mutations (stashed for next turn context) |
-| `post_tool_call` | Mark session dirty; throttled document nudge |
-| `on_session_end` | Log if dirty work remains |
+| `on_session_start` | Bind project (unbound if cwd is generic) |
+| `pre_llm_call` | Work-like prompts: search; upsert + open list only when bound |
+| `pre_tool_call` | Conceptual query before mutations (not the raw path) |
+| `post_tool_call` | Mark dirty; throttled document nudge |
+| `pre_verify` | Continue **once** when dirty / `changed_paths` so persist can run |
+| `on_session_end` / `on_session_finalize` | Log leftover dirty work |
 
-All hooks are **fail-open**.
+All hooks **fail-open**.
 
-## Trigger policy
+## Classification
 
-Full flow for: code edits, bug fixes, refactors, migrations, architecture/specs, tests/builds.
+- Bug fixed → `issue` / resolved; new bug → `issue` / open
+- Done work → `todo` / resolved; follow-up → `todo` / open
+- Decision → `arch` / resolved; spec → `spec` / open
+- Verification → `test`
+- Durable note → `info`; ephemeral session log → `work` (SLEEP promote/discard)
 
-Skip or minimize for: greetings, simple Q&A, formatting-only, one-line asks.
-
-## Classification defaults
-
-- Bug fixed → `kind: issue`, `status: resolved`
-- New unfixed bug → `kind: issue`, `status: open`
-- Completed implementation → `kind: todo`, `status: resolved`
-- Follow-up → `kind: todo`, `status: open`
-- Architecture decision → `kind: arch`, `status: resolved`
-- Spec → `kind: spec`, `status: open`
-- Test evidence → `kind: test`
+Prefer durable kinds. Never persist secrets.
 
 Never rely on the user to remind you to persist.

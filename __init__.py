@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from .reqall import client, state
-from .reqall.config import api_key, api_key_source, api_url
+from .reqall.config import api_key, api_key_source, api_url, load_plugin_settings, plugin_settings
 from .reqall.homes import format_install_hint, missing_enabled_homes
 from .reqall.hooks import (
     on_session_end,
@@ -51,6 +51,11 @@ REQALL_ACTIONS = (
     "sleep_candidates",
     "sleep_apply",
     "list_shares",
+    "share_project",
+    "revoke_share",
+    "delete_project",
+    "list_prompts",
+    "get_prompt",
 )
 
 
@@ -112,9 +117,10 @@ def register(ctx) -> None:
             "description": (
                 "Call Reqall memory API (same operations as MCP server `reqall`). "
                 "Use when host tools mcp__reqall__* / mcp__Reqall__* are unavailable. "
-                "Actions: search, upsert_project, upsert_record, get_record, "
-                "list_records, upsert_link, list_links, impact, sleep_candidates, "
-                "sleep_apply, list_projects, delete_record, delete_link, list_shares. "
+                "Actions: search, upsert_*, get_record, list_*, impact, sleep_*, "
+                "share_project, revoke_share, list_shares, list_prompts, get_prompt, "
+                "delete_record, delete_link, delete_project. "
+                "Deletes and share/revoke only when the user explicitly asked. "
                 "Pass MCP argument fields in `arguments`."
             ),
             "parameters": {
@@ -208,6 +214,18 @@ def register(ctx) -> None:
             logger.warning("reqall skill %s failed: %s", name, exc)
 
     try:
+        load_plugin_settings(
+            {
+                "project_name": ctx.get_config("project_name"),
+                "doc_interval_min": ctx.get_config("doc_interval_min"),
+                "persist_interval_min": ctx.get_config("persist_interval_min"),
+                "skip_profile_sync": ctx.get_config("skip_profile_sync"),
+            }
+        )
+    except Exception:
+        logger.debug("reqall plugin settings unavailable (fail-open)", exc_info=True)
+
+    try:
         if not skip_sync():
             sync = ensure_installs(PLUGIN_ROOT, apply=True)
             if sync.get("linked"):
@@ -286,6 +304,7 @@ def _handle_status(args: dict, **kwargs) -> str:
         "mcp_url": f"{api_url()}/mcp",
         "mcp_tool_name_example": "mcp__reqall__upsert_record",
         "plugin_api_tool": "reqall",
+        "plugin_settings": plugin_settings(),
         "skills": [n for n, _, _ in SKILLS],
         "session": state.load("default"),
         "mcp_host": mcp,
@@ -367,6 +386,14 @@ def _slash_reqall(raw_args: str) -> str:
     if verb == "clear-dirty":
         state.clear_dirty("default")
         return "Reqall dirty flag cleared for default session."
+    if verb == "prompt":
+        if rest:
+            return json.dumps(
+                client.mcp_call("get_prompt", {"name": rest}),
+                indent=2,
+                default=str,
+            )
+        return json.dumps(client.mcp_call("list_prompts", {}), indent=2, default=str)
     skill_verbs = {
         "context": "reqall-context",
         "persist": "reqall-persist",
@@ -394,7 +421,7 @@ def _slash_reqall(raw_args: str) -> str:
         return header + "\n" + dumped.get("body", "")
     return (
         "Usage: /reqall status | check | context | persist | document | "
-        "triage | review | sleep [org/repo] | ensure-install | clear-dirty\n"
+        "triage | review | sleep [org/repo] | prompt [name] | ensure-install | clear-dirty\n"
         "Plugin API tool: reqall action=<mcp_tool_name> arguments={...}\n"
         "Skill dump (no skill_view): reqall_skill or /reqall persist|context|…\n"
         "Host MCP names: mcp__reqall__search or mcp__Reqall__search (any case)\n"
