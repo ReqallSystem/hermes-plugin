@@ -154,9 +154,11 @@ def pre_llm_call(**kwargs: Any) -> Optional[Dict[str, str]]:
             paths = ", ".join((st.get("touched_paths") or [])[:8]) or "(paths noted)"
             chunks.append(
                 "[reqall] MANDATORY persistence before ending this turn if work "
-                f"was meaningful (touched: {paths}). Invoke skill **reqall-persist** "
-                f"with project_name={project}: upsert_project → upsert_record per "
-                "item → upsert_link → list_records. Skip pure Q&A / read-only. "
+                "was meaningful (touched: {paths}). Persist now: plugin tool "
+                f"`reqall` action=upsert_record (project_name={project}) or "
+                "load instructions via `reqall_skill` name=reqall-persist / "
+                "/reqall persist (works when skill_view is disabled). Then "
+                "upsert_link → list_records. Skip pure Q&A / read-only. "
                 "If Reqall is unavailable, continue and disclose that."
             )
 
@@ -220,7 +222,8 @@ def post_tool_call(
             st = state.load(sid)
             st["pending_doc_nudge"] = (
                 "[reqall] Meaningful tool use completed. If non-trivial, document "
-                "via skill **reqall-document** / upsert_record (skip read-only/no-op)."
+                "via `reqall` action=upsert_record or `reqall_skill` "
+                "name=reqall-document (skip read-only/no-op)."
             )
             state.save(sid, st)
     except Exception:
