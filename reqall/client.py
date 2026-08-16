@@ -17,6 +17,45 @@ logger = logging.getLogger(__name__)
 TIMEOUT_S = 12.0
 
 
+def parse_sse_jsonrpc(raw: str, request_id: Optional[str] = None) -> Any:
+    """Pick the JSON-RPC message out of a streamable-HTTP SSE body.
+
+    Ignores endpoint/progress frames. Prefers an event whose ``id`` matches
+    *request_id*, else the last event that looks like a JSON-RPC result/error.
+    """
+    events: list[Any] = []
+    buf: list[str] = []
+
+    def _flush() -> None:
+        if not buf:
+            return
+        blob = "\n".join(buf).strip()
+        buf.clear()
+        if not blob or blob == "[DONE]":
+            return
+        try:
+            events.append(json.loads(blob))
+        except Exception:
+            return
+
+    for line in (raw or "").splitlines():
+        if line.startswith("data:"):
+            buf.append(line[5:].lstrip())
+        elif not line.strip():
+            _flush()
+    _flush()
+    if not events:
+        raise ValueError("sse_empty")
+    if request_id is not None:
+        for ev in reversed(events):
+            if isinstance(ev, dict) and ev.get("id") == request_id:
+                return ev
+    for ev in reversed(events):
+        if isinstance(ev, dict) and ("result" in ev or "error" in ev):
+            return ev
+    return events[-1]
+
+
 def mcp_call(
     tool_name: str,
     arguments: Optional[Dict[str, Any]] = None,
@@ -28,10 +67,11 @@ def mcp_call(
         return {"ok": False, "error": "auth_missing"}
 
     base = api_url(env)
+    req_id = str(uuid.uuid4())
     body = json.dumps(
         {
             "jsonrpc": "2.0",
-            "id": str(uuid.uuid4()),
+            "id": req_id,
             "method": "tools/call",
             "params": {"name": tool_name, "arguments": arguments or {}},
         }
@@ -63,15 +103,11 @@ def mcp_call(
 
     try:
         if "text/event-stream" in content_type:
-            data_line = next(
-                (ln for ln in raw.splitlines() if ln.startswith("data: ")),
-                None,
-            )
-            if not data_line:
-                return {"ok": False, "error": "sse_empty"}
-            payload = json.loads(data_line[6:])
+            payload = parse_sse_jsonrpc(raw, req_id)
         else:
             payload = json.loads(raw)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc) or "sse_empty"}
     except Exception:
         return {"ok": False, "error": "parse_error", "raw": raw[:500]}
 

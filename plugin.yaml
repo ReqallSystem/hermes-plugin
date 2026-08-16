@@ -1,16 +1,37 @@
 name: reqall
-version: 2026.8.9
+version: 2026.8.10
 description: >
   Reqall persistent semantic memory for Hermes — session context injection,
   pre-edit recall, post-work persistence nudges, SLEEP memory compression,
   skills, plugin reqall API tool, and optional host MCP.
 author: ReqallSystem
 manifest_version: 1
+homepage: https://github.com/ReqallSystem/hermes-plugin
+tags:
+  - memory
+  - reqall
+  - mcp
 requires_env:
   - name: REQALL_API_KEY
     description: Reqall API key (Bearer) for MCP / hook recall
     url: https://www.reqall.net
     secret: true
+config_schema:
+  project_name:
+    type: str
+    description: Default Reqall project (org/repo). Env REQALL_PROJECT_NAME overrides.
+  doc_interval_min:
+    type: number
+    default: 10
+    description: Minutes between document nudges (0 = every mutation). Env REQALL_DOC_INTERVAL_MIN overrides.
+  persist_interval_min:
+    type: number
+    default: 30
+    description: Minutes between persist nudges. Env REQALL_PERSIST_INTERVAL_MIN overrides.
+  skip_profile_sync:
+    type: bool
+    default: false
+    description: Disable automatic symlink into other profiles on register(). Env REQALL_SKIP_PROFILE_SYNC=1 overrides.
 provides_hooks:
   - on_session_start
   - pre_llm_call

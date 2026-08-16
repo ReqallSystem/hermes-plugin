@@ -122,21 +122,36 @@ enabled. If the host disabled `skills`, use plugin tool `reqall_skill` or
 | Tool | `reqall` | `action` = MCP op (`upsert_record`, `search`, …), `arguments` = object |
 | Tool | `reqall_status` | Auth + project + dirty + MCP probe + **profile-install gaps** |
 | Tool | `reqall_skill` | Return a bundled skill body without `skill_view` |
-| Slash | `/reqall` | `status \| check \| context \| persist \| sleep \| ensure-install \| clear-dirty` |
+| Slash | `/reqall` | `status \| check \| persist \| sleep \| prompt \| ensure-install \| clear-dirty` |
 | Host MCP | `mcp__reqall__*` / `mcp__Reqall__*` | When `mcp_servers.reqall` (any case) is connected |
 
-## Environment
+## Environment and config
 
-| Variable | Default | Description |
+Secrets stay in the profile `.env`. Behavioral settings belong in
+`config.yaml` under `plugins.entries.reqall.settings` (env still overrides):
+
+```yaml
+plugins:
+  enabled: [reqall]
+  entries:
+    reqall:
+      settings:
+        project_name: org/repo          # optional default
+        doc_interval_min: 10
+        persist_interval_min: 30
+        skip_profile_sync: false
+```
+
+| Variable / setting | Default | Description |
 |----------|---------|-------------|
 | `REQALL_API_KEY` | required* | Bearer token |
 | `MCP_REQALL_API_KEY` | — | Alias accepted by the plugin HTTP client |
 | `REQALL_MCP_API_KEY` | — | Alias accepted by the plugin HTTP client |
 | `REQALL_URL` | `https://www.reqall.net` | API base |
-| `REQALL_PROJECT_NAME` | auto | Override project id string |
-| `REQALL_DOC_INTERVAL_MIN` | `10` | Min minutes between document nudges (`0` = every time) |
-| `REQALL_PERSIST_INTERVAL_MIN` | `30` | Min minutes between persist nudges |
-| `REQALL_SKIP_PROFILE_SYNC` | unset | Set `1` to disable automatic sibling-profile symlinks on `register()` |
+| `REQALL_PROJECT_NAME` / `settings.project_name` | auto | Override project id string |
+| `REQALL_DOC_INTERVAL_MIN` / `settings.doc_interval_min` | `10` | Minutes between document nudges (`0` = every time) |
+| `REQALL_PERSIST_INTERVAL_MIN` / `settings.persist_interval_min` | `30` | Minutes between persist nudges |
+| `REQALL_SKIP_PROFILE_SYNC` / `settings.skip_profile_sync` | unset | Disable automatic sibling-profile symlinks on `register()` |
 
 \*One of `REQALL_API_KEY` / `MCP_REQALL_API_KEY` / `REQALL_MCP_API_KEY` (or the
 shared Reqall CLI auth file) must be set.
