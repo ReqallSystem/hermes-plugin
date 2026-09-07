@@ -17,11 +17,60 @@ logger = logging.getLogger(__name__)
 TIMEOUT_S = 12.0
 
 
+def normalize_result(payload: Any) -> Dict[str, Any]:
+    """Normalize RPC/MCP/Reqall envelopes without mistaking transport for success.
+
+    Known record envelopes expose the record as data and retain link outcomes.
+    Empty object/null replies fail; an empty list remains a valid search result.
+    """
+    if isinstance(payload, str):
+        if not payload.strip():
+            return {"ok": False, "error": "empty_result"}
+        try:
+            return normalize_result(json.loads(payload))
+        except (ValueError, TypeError):
+            return {"ok": True, "data": payload, "text": payload}
+    if payload is None or payload == {} or isinstance(payload, (bool, int, float)):
+        return {"ok": False, "error": "empty_result"}
+    if not isinstance(payload, (dict, list)):
+        return {"ok": False, "error": "invalid_result"}
+    if isinstance(payload, list):
+        return {"ok": True, "data": payload, "text": _as_text(payload)}
+    if payload.get("isError") or payload.get("error") or payload.get("ok") is False:
+        return {**payload, "ok": False, "error": payload.get("error") or "mcp_error"}
+    if "result" in payload:
+        return normalize_result(payload["result"])
+    if "structuredContent" in payload:
+        return normalize_result(payload["structuredContent"])
+    if "content" in payload:
+        content = payload["content"]
+        texts = [item["text"] for item in content if isinstance(item, dict) and isinstance(item.get("text"), str)] if isinstance(content, list) else []
+        if not texts:
+            return {"ok": False, "error": "empty_result"}
+        results = [normalize_result(text) for text in texts]
+        failed = next((item for item in results if not item["ok"]), None)
+        return failed if failed is not None else results[0]
+    if "data" in payload:
+        result = normalize_result(payload["data"])
+        result.update({key: value for key, value in payload.items() if key not in {"ok", "data", "text"}})
+    elif isinstance(payload.get("record"), dict):
+        result = {"ok": True, "data": payload["record"], "record_saved": True,
+                  **{key: value for key, value in payload.items() if key != "record"}}
+    else:
+        result = {"ok": True, "data": payload}
+    for key in ("links", "link_results"):
+        links = result.get(key)
+        if isinstance(links, list) and any(isinstance(link, dict) and (link.get("ok") is False or link.get("error") or link.get("isError") or link.get("action") == "error") for link in links):
+            result.update(ok=False, error="link_failed")
+    result.setdefault("text", _as_text(result.get("data")))
+    return result
+
+
 def parse_sse_jsonrpc(raw: str, request_id: Optional[str] = None) -> Any:
     """Pick the JSON-RPC message out of a streamable-HTTP SSE body.
 
-    Ignores endpoint/progress frames. Prefers an event whose ``id`` matches
-    *request_id*, else the last event that looks like a JSON-RPC result/error.
+    Ignores endpoint/progress frames. Requires a matching ``id`` when
+    *request_id* is supplied; otherwise returns the last RPC result/error.
     """
     events: list[Any] = []
     buf: list[str] = []
@@ -50,6 +99,7 @@ def parse_sse_jsonrpc(raw: str, request_id: Optional[str] = None) -> Any:
         for ev in reversed(events):
             if isinstance(ev, dict) and ev.get("id") == request_id:
                 return ev
+        raise ValueError("sse_request_id_mismatch")
     for ev in reversed(events):
         if isinstance(ev, dict) and ("result" in ev or "error" in ev):
             return ev
@@ -111,23 +161,7 @@ def mcp_call(
     except Exception:
         return {"ok": False, "error": "parse_error", "raw": raw[:500]}
 
-    if isinstance(payload, dict) and payload.get("error"):
-        return {"ok": False, "error": "mcp_error", "detail": payload["error"]}
-
-    result = (payload or {}).get("result") if isinstance(payload, dict) else payload
-    text = ""
-    data: Any = result
-    if isinstance(result, dict):
-        content = result.get("content") or []
-        if content and isinstance(content, list):
-            first = content[0] if content else {}
-            if isinstance(first, dict) and isinstance(first.get("text"), str):
-                text = first["text"]
-                try:
-                    data = json.loads(text)
-                except Exception:
-                    data = text
-    return {"ok": True, "data": data, "text": text or _as_text(data)}
+    return normalize_result(payload)
 
 
 def upsert_project(name: str, env=None) -> Dict[str, Any]:

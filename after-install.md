@@ -1,53 +1,21 @@
-# After installing the Reqall Hermes plugin
+# After installing Reqall
 
-Hermes loads user plugins only from **`$HERMES_HOME/plugins/reqall`**.
-Each named profile is a separate home (`~/.hermes/profiles/<name>`).
-`plugins.enabled: [reqall]` in a profile does **not** copy the files.
+Install/update only the active `$HERMES_HOME/plugins/reqall`. Named profiles are
+separate. Registration never installs into another profile. Do not run
+`ensure-install.py` unless the user explicitly requests cross-profile installation.
 
-```bash
-# Install into the *current* HERMES_HOME, then enable:
-hermes plugins enable reqall
+1. Configure `REQALL_API_KEY` (or an accepted MCP alias) in the active profile's
+   secrets. Put project/machine/interval settings in config via `hermes config set`.
+2. Start a fresh Hermes process/session to load the plugin. Restart gateways only
+   from an external shell, not their own agent session.
+3. `/reqall status` diagnoses; `/reqall check` performs a read-only auth check.
+4. Use `reqall_skill name=reqall-context` then `reqall-intend` for substantial
+   agreed work, and `reqall-persist` for outcomes.
+5. Capture `reqall_session action=status` before persisting; acknowledge with
+   exact `session_id`, `record_ids`, and snapshot `work_revision` only after records
+   and links are verified. The tool performs readbacks before clearing pending work.
 
-# Sync this checkout into every profile that already enabled reqall:
-python3 ensure-install.py
-# or: python3 -m reqall.install   (from the plugin directory)
-```
-
-1. Put secrets in the **active profile** `.env` only. Either name works:
-
-```bash
-REQALL_API_KEY=…
-# or the host-MCP alias:
-# MCP_REQALL_API_KEY=…
-# REQALL_URL=https://www.reqall.net
-# REQALL_PROJECT_NAME=org/repo
-```
-
-2. **Optional host MCP** in that same profile `config.yaml` (any key case):
-
-```yaml
-mcp_servers:
-  reqall:   # or Reqall — tools become mcp__reqall__* or mcp__Reqall__*
-    url: https://www.reqall.net/mcp
-    headers:
-      Authorization: Bearer ${REQALL_API_KEY}
-      # ${MCP_REQALL_API_KEY} is also accepted by the plugin HTTP client
-```
-
-3. Restart **that profile's** gateway from an **external** shell (a gateway
-   session cannot restart itself). On long-lived chats run **`/new`**.
-
-4. Verify:
-
-```text
-/reqall check
-/reqall ensure-install
-```
-
-`reqall_status` should show `plugin_loaded: true`. If
-`profile_installs_missing` is non-empty, run `/reqall ensure-install`,
-restart those profiles, then `/new`.
-
-5. Persist without host MCP: `reqall` action=`upsert_record`.
-   If `skill_view` is disabled: `reqall_skill` name=`reqall-persist`
-   or `/reqall persist` (dumps the skill body).
+Host MCP OAuth alone does not supply the typed readbacks required by this plugin's
+acknowledgement yet. Keep a profile-scoped API key for native `reqall` operations.
+The old `/reqall clear-dirty` no longer bypasses persistence checks. Existing records
+and session markers are preserved; no migration/deletion is performed.

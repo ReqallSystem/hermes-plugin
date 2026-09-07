@@ -1,4 +1,4 @@
-"""In-memory + disk session markers for throttle / dirty tracking."""
+"""Atomic JSON session state with cross-process transaction locking."""
 
 from __future__ import annotations
 
@@ -6,12 +6,16 @@ import json
 import os
 import tempfile
 import time
+import threading
+import sqlite3
+from contextlib import contextmanager
+from .config import hermes_home
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 
 def _state_dir() -> Path:
-    base = os.environ.get("HERMES_HOME") or str(Path.home() / ".hermes")
+    base = hermes_home()
     d = Path(base) / "reqall" / "sessions"
     d.mkdir(parents=True, exist_ok=True)
     return d
@@ -22,7 +26,34 @@ def _path(session_id: str) -> Path:
     return _state_dir() / f"{safe}.json"
 
 
+_LOCKS = {}
+_LOCKS_GUARD = threading.Lock()
+
+
+@contextmanager
+def _locked(path):
+    key = str(path.parent.resolve())
+    with _LOCKS_GUARD:
+        lock = _LOCKS.setdefault(key, threading.RLock())
+    with lock:
+        # SQLite supplies a cross-process lock on Windows as well as POSIX.
+        # Session data stays in the existing atomically replaced JSON files.
+        connection = sqlite3.connect(str(path.parent / ".state-lock.sqlite3"), timeout=30)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            yield
+        finally:
+            try:
+                connection.rollback()
+            finally:
+                connection.close()
+
+
 def load(session_id: str) -> Dict[str, Any]:
+    return _load_path(session_id, _path(session_id))
+
+
+def _load_path(session_id, path):
     default = {
         "session_id": session_id or "default",
         "dirty": False,
@@ -32,7 +63,6 @@ def load(session_id: str) -> Dict[str, Any]:
         "last_persist_nudge_at": 0.0,
         "touched_paths": [],
     }
-    path = _path(session_id)
     if not path.exists():
         return dict(default)
     try:
@@ -46,8 +76,26 @@ def load(session_id: str) -> Dict[str, Any]:
     return dict(default)
 
 
+def update(session_id, mutator) -> Dict[str, Any]:
+    """Atomically mutate the latest state in place; ignore mutator's return value.
+
+    Locks cover threads and processes sharing a profile. Raises on failed writes;
+    callers must not treat unsaved state as reconciled. Legacy JSON stays readable.
+    """
+    path = _path(session_id)
+    with _locked(path):
+        st = _load_path(session_id, path)
+        mutator(st)
+        return _save_path(session_id, st, path)
+
+
 def save(session_id: str, state: Dict[str, Any]) -> None:
     path = _path(session_id)
+    with _locked(path):
+        _save_path(session_id, state, path)
+
+
+def _save_path(session_id, state, path):
     state = dict(state)
     state["session_id"] = session_id or "default"
     state["updated_at"] = time.time()
@@ -61,36 +109,39 @@ def save(session_id: str, state: Dict[str, Any]) -> None:
             os.unlink(tmp_name)
         except OSError:
             pass
+        raise
+    return state
 
 
 def mark_dirty(session_id: str, path: Optional[str] = None) -> Dict[str, Any]:
-    st = load(session_id)
-    st["dirty"] = True
-    if path:
-        paths = list(st.get("touched_paths") or [])
-        if path not in paths:
-            paths.append(path)
+    def mutate(st):
+        st["dirty"] = True
+        st["work_revision"] = int(st.get("work_revision") or 0) + 1
+        if path:
+            paths = list(st.get("touched_paths") or [])
+            if path not in paths:
+                paths.append(path)
             st["touched_paths"] = paths[-40:]
-    save(session_id, st)
-    return st
+    return update(session_id, mutate)
 
 
 def clear_dirty(session_id: str) -> None:
-    st = load(session_id)
-    st["dirty"] = False
-    st["touched_paths"] = []
-    st["last_persist_nudge_at"] = time.time()
-    save(session_id, st)
+    def mutate(st):
+        st["dirty"] = False
+        st["touched_paths"] = []
+        st["persist_nudge_sent"] = False
+        st["last_persist_nudge_at"] = time.time()
+    update(session_id, mutate)
 
 
 def should_nudge(session_id: str, kind: str, interval_min: float) -> bool:
-    if interval_min <= 0:
-        return True
-    st = load(session_id)
-    key = "last_doc_nudge_at" if kind == "doc" else "last_persist_nudge_at"
-    last = float(st.get(key) or 0)
-    if (time.time() - last) < interval_min * 60:
-        return False
-    st[key] = time.time()
-    save(session_id, st)
-    return True
+    allowed = False
+    def mutate(st):
+        nonlocal allowed
+        key = "last_doc_nudge_at" if kind == "doc" else "last_persist_nudge_at"
+        now = time.time()
+        if interval_min <= 0 or now - float(st.get(key) or 0) >= interval_min * 60:
+            st[key] = now
+            allowed = True
+    update(session_id, mutate)
+    return allowed

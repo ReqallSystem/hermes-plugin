@@ -19,30 +19,37 @@ API_KEY_ENVS = (
 )
 
 # Filled by register() from plugins.entries.reqall.settings; env still wins.
-_PLUGIN_SETTINGS: Dict[str, Any] = {}
+_PLUGIN_SETTINGS: Dict[str, Dict[str, Any]] = {}
+
+
+def hermes_home() -> Path:
+    """Resolve the active host context; standalone use stays under its own HOME."""
+    try:
+        from hermes_constants import get_hermes_home
+    except ImportError:
+        return Path(os.environ.get("HERMES_HOME") or Path.home() / ".hermes").expanduser()
+    return Path(get_hermes_home()).expanduser()
+
+
+def _scope_key() -> str:
+    return str(hermes_home().resolve())
 
 
 def load_plugin_settings(settings: Optional[Mapping[str, Any]]) -> None:
     """Replace the in-process settings cache (fail-open callers)."""
-    _PLUGIN_SETTINGS.clear()
-    if not settings:
-        return
-    for key, value in settings.items():
-        if value is not None:
-            _PLUGIN_SETTINGS[str(key)] = value
+    _PLUGIN_SETTINGS[_scope_key()] = {
+        str(key): value for key, value in (settings or {}).items() if value is not None
+    }
 
 
 def plugin_settings() -> Dict[str, Any]:
-    return dict(_PLUGIN_SETTINGS)
+    return dict(_PLUGIN_SETTINGS.get(_scope_key(), {}))
 
 
 def _hermes_file_settings(env: Optional[Mapping[str, str]] = None) -> Dict[str, Any]:
     """Best-effort read of plugins.entries.reqall.settings from $HERMES_HOME."""
-    e = env if env is not None else os.environ
-    home = (e.get("HERMES_HOME") or "").strip()
-    if not home:
-        return {}
-    path = Path(home).expanduser() / "config.yaml"
+    home = Path(env["HERMES_HOME"]).expanduser() if env and env.get("HERMES_HOME") else hermes_home()
+    path = home / "config.yaml"
     if not path.is_file():
         return {}
     try:
@@ -76,43 +83,60 @@ def _hermes_file_settings(env: Optional[Mapping[str, str]] = None) -> Dict[str, 
 
 def _merged_settings(env: Optional[Mapping[str, str]] = None) -> Dict[str, Any]:
     merged = _hermes_file_settings(env)
-    merged.update(_PLUGIN_SETTINGS)
+    merged.update(plugin_settings())
     return merged
 
 
 def api_url(env: Dict[str, str] | None = None) -> str:
     e = env if env is not None else os.environ
-    raw = (e.get("REQALL_URL") or e.get("REQALL_API_URL") or DEFAULT_URL).strip()
+    raw = str(e.get("REQALL_URL") or e.get("REQALL_API_URL") or _merged_settings(env).get("api_url") or DEFAULT_URL).strip()
     return raw.rstrip("/")
 
 
-def api_key(env: Dict[str, str] | None = None) -> str:
-    """Return the first non-empty Reqall bearer token.
-
-    Accepts REQALL_API_KEY (preferred) and the MCP-template aliases
-    MCP_REQALL_API_KEY / REQALL_MCP_API_KEY so hook HTTP and host MCP
-    can share one secret under either name.
-    """
-    e = env if env is not None else os.environ
+def _credential(env=None):
+    scoped = env is not None
+    if env is not None:
+        getter = env.get
+    else:
+        try:
+            from agent.secret_scope import get_secret, current_secret_scope, is_multiplex_active
+        except ImportError:
+            getter = os.environ.get
+        else:
+            getter = get_secret
+            scoped = current_secret_scope() is not None or is_multiplex_active()
+        try:
+            from hermes_constants import get_hermes_home_override
+            scoped = scoped or bool(get_hermes_home_override())
+        except ImportError:
+            pass
     for name in API_KEY_ENVS:
-        val = (e.get(name) or "").strip()
+        try:
+            val = str(getter(name) or "").strip()
+        except Exception:
+            return "", "missing"
         if val:
-            return val
-    cfg = _load_stored_auth()
-    token = cfg.get("access_token") or cfg.get("api_key") or ""
-    return str(token).strip()
+            return val, name
+    if not scoped:
+        cfg = _load_stored_auth()
+        token = cfg.get("access_token") or cfg.get("api_key") or ""
+        if token:
+            return str(token).strip(), "stored_auth"
+    return "", "missing"
+
+
+def api_key(env: Dict[str, str] | None = None) -> str:
+    """Resolve scoped secrets; shared CLI auth is available only when unscoped."""
+    return _credential(env)[0]
 
 
 def api_key_source(env: Dict[str, str] | None = None) -> str:
-    """Which lookup produced the token (for status / docs)."""
+    return _credential(env)[1]
+
+
+def machine_name_override(env: Mapping[str, str] | None = None) -> str:
     e = env if env is not None else os.environ
-    for name in API_KEY_ENVS:
-        if (e.get(name) or "").strip():
-            return name
-    cfg = _load_stored_auth()
-    if cfg.get("access_token") or cfg.get("api_key"):
-        return "stored_auth"
-    return "missing"
+    return str(e.get("REQALL_MACHINE_NAME") or _merged_settings(env).get("machine_name") or "").strip()
 
 
 def project_name_override(env: Mapping[str, str] | None = None) -> str:
@@ -120,7 +144,7 @@ def project_name_override(env: Mapping[str, str] | None = None) -> str:
     env_val = (e.get("REQALL_PROJECT_NAME") or "").strip()
     if env_val:
         return env_val
-    raw = _merged_settings(e).get("project_name")
+    raw = _merged_settings(env).get("project_name")
     return str(raw).strip() if raw else ""
 
 
@@ -147,7 +171,7 @@ def skip_profile_sync(env: Optional[Mapping[str, str]] = None) -> bool:
     raw = (e.get("REQALL_SKIP_PROFILE_SYNC") or "").strip()
     if raw:
         return raw.lower() in {"1", "true", "yes", "on"}
-    val = _merged_settings(e).get("skip_profile_sync")
+    val = _merged_settings(env).get("skip_profile_sync")
     if isinstance(val, bool):
         return val
     if val is None:
@@ -169,7 +193,7 @@ def _float_setting(
             return float(raw)
         except ValueError:
             return float(default)
-    val = _merged_settings(e).get(setting_name)
+    val = _merged_settings(env).get(setting_name)
     if val is None or val == "":
         return float(default)
     try:

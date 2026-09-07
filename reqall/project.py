@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import os
 import re
+import socket
 import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
 from urllib.parse import urlparse
 
-from .config import project_name_override
+from .config import machine_name_override, project_name_override
 
 # Basenames that are home/workspace noise, not a Reqall project id.
 GENERIC_DIR_NAMES = frozenset(
@@ -50,17 +51,9 @@ GENERIC_DIR_NAMES = frozenset(
     }
 )
 
-_MIME_LEFT = frozenset(
-    {"text", "application", "image", "audio", "video", "font", "multipart", "message"}
-)
-
-_GITHUB = re.compile(
-    r"(?:github\.com[:/]|gitlab\.com[:/])([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)",
-    re.I,
-)
-_ORG_REPO = re.compile(r"\b([A-Za-z0-9_.-]{2,40})/([A-Za-z0-9_.-]{2,80})\b")
 _PROJECT_KV = re.compile(
-    r"\bproject(?:_name)?\s*[:=]\s*[`'\"]?([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)",
+    r"(?<![\w/-])project(?:_name)?\s*[:=]\s*"
+    r"(?:`([^`\r\n]+)`|'([^'\r\n]+)'|\"([^\"\r\n]+)\"|([^\s`'\",;]+))",
     re.I,
 )
 
@@ -103,27 +96,39 @@ def is_generic_cwd(cwd: Path) -> bool:
 
 
 def extract_project_hint(text: str) -> Optional[str]:
-    """Pull an org/repo mention from prose. Never treat MIME types as projects."""
+    """Accept only explicitly labelled selections, never incidental slash tokens."""
     if not text:
         return None
     kv = _PROJECT_KV.search(text)
     if kv:
-        return _clean_repo(kv.group(1))
-    gh = _GITHUB.search(text)
-    if gh:
-        return _clean_repo(gh.group(1))
-    for match in _ORG_REPO.finditer(text):
-        left, right = match.group(1), match.group(2)
-        if left.lower() in _MIME_LEFT:
-            continue
-        if right.lower() in {"com", "org", "net", "io", "png", "jpg", "json", "html"}:
-            continue
-        return _clean_repo(f"{left}/{right}")
+        return next(value for value in kv.groups() if value is not None).strip() or None
     return None
 
 
-def _clean_repo(value: str) -> str:
-    return re.sub(r"\.git$", "", (value or "").strip()).strip("/")
+def machine_project_name(env: Optional[Mapping[str, str]] = None) -> str:
+    """Claude-compatible reserved machine/OS-user bucket, never cwd-derived."""
+    def clean(segment: str) -> str:
+        return re.sub(r"[\\/\s]+", "-", segment.strip()).strip("-") or "unknown"
+
+    host = machine_name_override(env)
+    if not host:
+        try:
+            host = socket.gethostname().split(".")[0]
+        except OSError:
+            host = "unknown"
+    try:
+        import pwd
+
+        user = pwd.getpwuid(os.getuid()).pw_name or "unknown"
+    except ImportError:
+        # Windows has no pwd module. Use OS identity, not USER/USERNAME env hints.
+        try:
+            user = os.getlogin() or "unknown"
+        except (AttributeError, OSError):
+            user = "unknown"
+    except (AttributeError, KeyError, OSError):
+        user = "unknown"
+    return f".machine/{clean(host).lower()}/{clean(user)}"
 
 
 def bind_project(
@@ -132,8 +137,7 @@ def bind_project(
     env: Optional[Mapping[str, str]] = None,
 ) -> ProjectBinding:
     """Resolve a Reqall project without creating junk names from $HOME."""
-    e = env if env is not None else os.environ
-    override = project_name_override(e)
+    override = project_name_override(env)
     if override:
         return ProjectBinding(override, "override", True)
 
@@ -148,10 +152,7 @@ def bind_project(
     if hint:
         return ProjectBinding(hint, "prompt", True)
 
-    if not is_generic_cwd(root) and not is_generic_dirname(root.name):
-        return ProjectBinding(root.name, "cwd", True)
-
-    return ProjectBinding(None, "unbound", False)
+    return ProjectBinding(machine_project_name(env), "machine", True)
 
 
 def resolve_project_name(
@@ -159,7 +160,7 @@ def resolve_project_name(
     env: Optional[Dict[str, str]] = None,
     prompt: Optional[str] = None,
 ) -> str:
-    """Back-compat string form. Empty when unbound (do not upsert)."""
+    """Back-compat string form of the deterministic project binding."""
     return bind_project(cwd=cwd, prompt=prompt, env=env).name or ""
 
 

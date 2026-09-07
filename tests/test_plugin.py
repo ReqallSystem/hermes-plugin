@@ -238,12 +238,14 @@ class ReqallPluginTests(unittest.TestCase):
         out = json.loads(self.pkg._handle_reqall_skill({"name": "persist"}))
         self.assertTrue(out["ok"])
         self.assertEqual(out["name"], "reqall-persist")
-        self.assertIn("Classify the work", out["body"])
+        self.assertIn("# Persist Work", out["body"])
 
     def test_slash_persist_dumps_skill(self):
         text = self.pkg._slash_reqall("persist")
         self.assertIn("reqall-persist", text)
-        self.assertIn("Classify the work", text)
+        self.assertIn("# Persist Work", text)
+        self.assertIn("acknowledge", text)
+        self.assertNotIn("call /reqall clear-dirty", text)
 
     def test_profile_install_symlink(self):
         homes_mod = importlib.import_module(f"{PKG}.reqall.homes")
@@ -280,16 +282,16 @@ class ReqallPluginTests(unittest.TestCase):
             self.assertEqual(out["action"], "skipped_existing")
             self.assertEqual((dest / "plugin.yaml").read_text(encoding="utf-8"), "name: other\n")
 
-    def test_generic_cwd_is_unbound(self):
+    def test_generic_cwd_uses_machine_project(self):
         binding = self.project.bind_project(cwd="/tmp", env={})
-        self.assertFalse(binding.safe_to_upsert)
-        self.assertIsNone(binding.name)
-        self.assertEqual(self.project.resolve_project_name("/tmp", env={}), "")
+        self.assertTrue(binding.safe_to_upsert)
+        self.assertTrue(binding.name.startswith(".machine/"))
+        self.assertEqual(self.project.resolve_project_name("/tmp", env={}), binding.name)
 
     def test_prompt_org_repo_binds(self):
         binding = self.project.bind_project(
             cwd="/home/ubuntu",
-            prompt="Look at fingerskier/zeus Dexie Cloud leftovers",
+            prompt="project_name=fingerskier/zeus\ninspect Dexie Cloud leftovers",
             env={},
         )
         self.assertTrue(binding.safe_to_upsert)
@@ -326,7 +328,7 @@ class ReqallPluginTests(unittest.TestCase):
                 again = self.hooks.pre_verify(session_id=sid, changed_paths=["src/app.py"])
                 self.assertIsNone(again)
 
-    def test_pre_llm_does_not_upsert_unbound(self):
+    def test_pre_llm_upserts_reserved_machine_not_cwd(self):
         with tempfile.TemporaryDirectory() as tmp:
             with mock.patch.dict("os.environ", {"HERMES_HOME": tmp}):
                 with mock.patch(
@@ -342,7 +344,8 @@ class ReqallPluginTests(unittest.TestCase):
                             user_message="please implement the auth fix",
                             cwd="/tmp",
                         )
-                up.assert_not_called()
+                up.assert_called_once()
+                self.assertTrue(up.call_args.args[0].startswith(".machine/"))
 
     def test_sse_skips_leading_frames(self):
         raw = (

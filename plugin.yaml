@@ -1,37 +1,41 @@
 name: reqall
-version: 2026.8.10
+version: 2026.9.7
 description: >
-  Reqall persistent semantic memory for Hermes — session context injection,
-  pre-edit recall, post-work persistence nudges, SLEEP memory compression,
-  skills, plugin reqall API tool, and optional host MCP.
+  Reqall project memory for Hermes — turn-start recall, agreed intent,
+  inline record links, verified persistence acknowledgement, and SLEEP.
 author: ReqallSystem
 manifest_version: 1
 homepage: https://github.com/ReqallSystem/hermes-plugin
-tags:
-  - memory
-  - reqall
-  - mcp
+tags: [memory, reqall, mcp]
 requires_env:
   - name: REQALL_API_KEY
-    description: Reqall API key (Bearer) for MCP / hook recall
+    description: Reqall API key for typed hook recall and verified record/link readbacks (MCP aliases also accepted)
     url: https://www.reqall.net
     secret: true
 config_schema:
   project_name:
     type: str
-    description: Default Reqall project (org/repo). Env REQALL_PROJECT_NAME overrides.
+    description: Explicit project override. REQALL_PROJECT_NAME overrides this setting.
+  machine_name:
+    type: str
+    description: Stable machine hostname for reserved project fallback; REQALL_MACHINE_NAME overrides.
+  api_url:
+    type: str
+    default: https://www.reqall.net
+    description: Reqall base origin without /mcp; REQALL_URL overrides.
   doc_interval_min:
     type: number
     default: 10
-    description: Minutes between document nudges (0 = every mutation). Env REQALL_DOC_INTERVAL_MIN overrides.
+    description: Minimum minutes between documentation nudges; zero disables throttling.
   persist_interval_min:
     type: number
     default: 30
-    description: Minutes between persist nudges. Env REQALL_PERSIST_INTERVAL_MIN overrides.
-  skip_profile_sync:
-    type: bool
-    default: false
-    description: Disable automatic symlink into other profiles on register(). Env REQALL_SKIP_PROFILE_SYNC=1 overrides.
+    description: Minimum minutes between turn-start dirty-work reminders; edited-code gate is per turn.
+provides_tools:
+  - reqall
+  - reqall_status
+  - reqall_skill
+  - reqall_session
 provides_hooks:
   - on_session_start
   - pre_llm_call
@@ -44,6 +48,7 @@ provides_commands:
   - reqall
 provides_skills:
   - reqall-context
+  - reqall-intend
   - reqall-persist
   - reqall-document
   - reqall-triage

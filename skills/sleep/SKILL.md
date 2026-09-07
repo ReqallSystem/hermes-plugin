@@ -1,6 +1,6 @@
 ---
 name: reqall-sleep
-description: Compress project memory — consolidate, split, compact, skip, crosslink, promote, discard
+description: Consolidate memory and promote or discard work logs.
 ---
 
 # SLEEP — compress project memory
@@ -35,15 +35,22 @@ consolidate/split. Prefer `info` / `arch` / `todo` / `issue` when promoting.
 
 ## Steps
 
-1. **Project** — arg → `REQALL_PROJECT_NAME` → git `org/repo`. Do not invent
-   a name from `$HOME` / `ubuntu` / `src`. `upsert_project` → `project_id`.
+1. **Project** — use the explicit requested SLEEP target, otherwise read the
+   binding from `reqall_session action=status`: explicit override → git origin
+   → explicit labelled project selection → `.machine/<hostname>/<os-user>`.
+   `REQALL_MACHINE_NAME` overrides hostname. Never use a cwd basename or a prose
+   path. `upsert_project` with the exact name → `project_id`. Do not migrate
+   historical records or touch another profile.
 2. **Candidates** — `sleep_candidates` with `project_id`. If rate-limited,
    report next eligible time and stop.
 3. **Summary** — counts: consolidate, compact/skip, split, crosslink,
    work_review. Empty → "Nothing to do — graph is healthy."
 4. **Select ops** — decision table only. Bodies: terse, non-redundant.
 5. **Apply** — one `sleep_apply` with the batch. No per-op confirmation.
-6. **Report** — consolidated / compacted / split / crosslinked / skipped /
+6. **Verify** — inspect every apply result for partial failures. Read back exact
+   surviving/new records and required links; verify deleted source IDs are absent.
+   Do not retry the whole destructive batch after an ambiguous response.
+7. **Report** — consolidated / compacted / split / crosslinked / skipped /
    promoted / discarded / errors.
 
 ## Rules
@@ -53,4 +60,5 @@ consolidate/split. Prefer `info` / `arch` / `todo` / `issue` when promoting.
   the work log.
 - Do not ask whether rewrite/delete is OK — user ran sleep.
 - Unclear candidate → omit.
-- Safety is enforced by `sleep_apply` — do not re-check.
+- Server validation does not replace result/readback verification.
+- Never persist secrets. Prefer durable records, not raw transcripts.
