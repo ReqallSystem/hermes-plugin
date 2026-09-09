@@ -31,8 +31,12 @@ def hermes_home() -> Path:
     return Path(get_hermes_home()).expanduser()
 
 
-def _scope_key() -> str:
-    return str(hermes_home().resolve())
+def _settings_home(env: Optional[Mapping[str, str]] = None) -> Path:
+    return Path(env["HERMES_HOME"]).expanduser() if env and env.get("HERMES_HOME") else hermes_home()
+
+
+def _scope_key(env: Optional[Mapping[str, str]] = None) -> str:
+    return str(_settings_home(env).resolve())
 
 
 def load_plugin_settings(settings: Optional[Mapping[str, Any]]) -> None:
@@ -42,13 +46,13 @@ def load_plugin_settings(settings: Optional[Mapping[str, Any]]) -> None:
     }
 
 
-def plugin_settings() -> Dict[str, Any]:
-    return dict(_PLUGIN_SETTINGS.get(_scope_key(), {}))
+def plugin_settings(env: Optional[Mapping[str, str]] = None) -> Dict[str, Any]:
+    return dict(_PLUGIN_SETTINGS.get(_scope_key(env), {}))
 
 
 def _hermes_file_settings(env: Optional[Mapping[str, str]] = None) -> Dict[str, Any]:
     """Best-effort read of plugins.entries.reqall.settings from $HERMES_HOME."""
-    home = Path(env["HERMES_HOME"]).expanduser() if env and env.get("HERMES_HOME") else hermes_home()
+    home = _settings_home(env)
     path = home / "config.yaml"
     if not path.is_file():
         return {}
@@ -83,7 +87,7 @@ def _hermes_file_settings(env: Optional[Mapping[str, str]] = None) -> Dict[str, 
 
 def _merged_settings(env: Optional[Mapping[str, str]] = None) -> Dict[str, Any]:
     merged = _hermes_file_settings(env)
-    merged.update(plugin_settings())
+    merged.update(plugin_settings(env))
     return merged
 
 

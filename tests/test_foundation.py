@@ -45,6 +45,35 @@ class FoundationTests(unittest.TestCase):
         self.assertEqual(config.project_name_override(), 'one')
         self.assertEqual(config.doc_interval_min(), 2)
 
+    def test_explicit_home_uses_only_its_file_and_cache_settings(self):
+        other = self.home / 'b'
+        other.mkdir()
+        settings = {'api_url': 'https://b.invalid', 'project_name': 'org/b',
+                    'machine_name': 'b', 'doc_interval_min': 3,
+                    'persist_interval_min': 4, 'skip_profile_sync': True}
+        (other / 'config.yaml').write_text(json.dumps(
+            {'plugins': {'entries': {'reqall': {'settings': settings}}}}))
+        config.load_plugin_settings({'api_url': 'https://a.invalid',
+                                    'project_name': 'org/a', 'machine_name': 'a',
+                                    'doc_interval_min': 8, 'persist_interval_min': 9,
+                                    'skip_profile_sync': False})
+        env = {'HERMES_HOME': str(other)}
+        self.assertEqual(config.api_url(env), 'https://b.invalid')
+        self.assertEqual(config.project_name_override(env), 'org/b')
+        self.assertEqual(config.machine_name_override(env), 'b')
+        self.assertEqual(config.doc_interval_min(env), 3)
+        self.assertEqual(config.persist_interval_min(env), 4)
+        self.assertTrue(config.skip_profile_sync(env))
+        self.active.set(other)
+        config.load_plugin_settings({'api_url': 'https://b-cache.invalid'})
+        self.active.set(self.home / 'a')
+        self.assertEqual(config.api_url(env), 'https://b-cache.invalid')
+        self.assertEqual(config.api_url(), 'https://a.invalid')
+        self.assertEqual(config.api_url(dict(env, REQALL_URL='https://env.invalid')),
+                         'https://env.invalid')
+        self.assertEqual(config.api_url({'HERMES_HOME': str(self.home / 'missing')}),
+                         config.DEFAULT_URL)
+
     def test_scoped_secret_never_uses_shared_cli_auth(self):
         os.environ['REQALL_API_KEY'] = 'wrong'
         self.secrets.set({'MCP_REQALL_API_KEY': 'scoped'})

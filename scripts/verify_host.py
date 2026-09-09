@@ -9,6 +9,8 @@ import importlib.util
 import json
 import os
 import socket
+import shlex
+import subprocess
 import sys
 import tempfile
 from types import SimpleNamespace
@@ -61,6 +63,21 @@ with tempfile.TemporaryDirectory(prefix='reqall-host-') as home:
                                       result=json.dumps({'success': True}), session_id=sid)
             assert pkg.state.load(sid)['dirty']
             assert pkg.state.load(sid)['touched_paths'] == ['a.py']
+            # Exercise real host error-status dispatch after an actual partial write.
+            marker = Path(home) / 'partial.txt'
+            command = [sys.executable, '-c',
+                       'from pathlib import Path; import sys; Path(sys.argv[1]).write_text("partial"); raise SystemExit(1)',
+                       str(marker)]
+            run = subprocess.run(command, capture_output=True, text=True)
+            assert run.returncode == 1 and marker.read_text() == 'partial'
+            _emit_post_tool_call_hook(function_name='terminal', function_args={'command': shlex.join(command)},
+                                      result=json.dumps({'exit_code': run.returncode, 'output': run.stdout}),
+                                      session_id='failed-terminal')
+            assert pkg.state.load('failed-terminal')['dirty']
+            _emit_post_tool_call_hook(function_name='terminal', function_args={'command': shlex.join(command)},
+                                      result=json.dumps({'status': 'blocked', 'exit_code': -1, 'error': 'denied'}),
+                                      session_id='blocked-terminal')
+            assert not pkg.state.load('blocked-terminal')['dirty']
             partial = {'ok': False, 'error': 'link_failed', 'record_saved': True,
                        'data': {'id': 1, 'kind': 'spec', 'project_id': 7}}
             _emit_post_tool_call_hook(function_name='reqall', function_args={'action': 'upsert_record'},
@@ -88,6 +105,8 @@ with tempfile.TemporaryDirectory(prefix='reqall-host-') as home:
                 pkg.state.update('same-session', lambda st: st.update(scope=label))
                 config.load_plugin_settings({'machine_name': label})
                 assert config.machine_name_override() == label
+                if label == 'b':
+                    assert config.machine_name_override({'HERMES_HOME': str(Path(home) / 'a')}) == 'a'
             finally:
                 reset_secret_scope(secret_token)
                 reset_hermes_home_override(home_token)
@@ -100,5 +119,6 @@ with tempfile.TemporaryDirectory(prefix='reqall-host-') as home:
         finally:
             reset_secret_scope(empty_token)
             set_multiplex_active(previous_multiplex)
-        print(json.dumps({'ok': True, 'real_host_scopes': True, 'host_hooks': ['pre_llm_call', 'pre_tool_call', 'post_tool_call', 'pre_verify'],
+        print(json.dumps({'ok': True, 'real_host_scopes': True, 'failed_execution_tracking': True,
+                          'host_hooks': ['pre_llm_call', 'pre_tool_call', 'post_tool_call', 'pre_verify'],
                           'tools': sorted(tools), 'skills': sorted(skills), 'network': 'denied', 'state': 'temporary'}))

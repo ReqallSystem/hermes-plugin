@@ -27,8 +27,9 @@ or acknowledge unrelated IDs merely to silence a reminder.
 |---|---|---|
 | Bug fixed / new bug found | issue | resolved / open |
 | Completed task / follow-up | todo | resolved / open |
-| Agreed architectural decision | arch | resolved |
-| New or updated specification | spec | open |
+| Standalone completed design decision (outcome) | arch | resolved |
+| New architectural commitment (intent, not outcome) | arch | open |
+| New or updated specification (intent, not outcome) | spec | open |
 | Verification evidence | test | resolved |
 | Durable convention or how-to | info | resolved |
 | Ephemeral progress log | work | resolved |
@@ -36,6 +37,16 @@ or acknowledge unrelated IDs merely to silence a reminder.
 Prefer durable kinds; `work` is only for a log eligible for SLEEP `work_review`
 → `promote` / `discard`. Titles use `BUG:`, `TASK:`, `ARCH:`, `API:`, `FEAT:`,
 `TEST:`, `INFO:`, or `WORK:` as appropriate. Never persist secrets.
+
+New commitments belong in `reqall-intend` before work and before the outcome
+snapshot. All `spec` writes and open/unspecified-status `arch` writes are intent;
+they advance the work revision and cannot acknowledge themselves. A standalone
+completed `arch` decision may be an outcome only with explicit `status: resolved`
+and only if its ID is not already selected or written as intent this session.
+Changing a selected/written commitment to resolved does not turn it into an
+outcome: persist separate evidence with an `implements` link, or an open gap todo
+with a `blocks` link. A design outcome must still reconcile any other pending
+intent with real links, and its kind/status are checked again at readback.
 
 ## Procedure
 
@@ -55,8 +66,8 @@ Prefer durable kinds; `work` is only for a log eligible for SLEEP `work_review`
    and follow-ups. Distinguish completed work from plans and failed attempts.
    Search conceptually and read candidate records; update an existing matching
    record (`id`) instead of duplicating. Do not resolve intent until its acceptance
-   criteria are verified. Select existing intent with `reqall_session
-   action=select_intent record_id=<id> session_id=<session_id>` when needed.
+   criteria are verified. If new scope requires selecting or writing intent now,
+   use `reqall-intend`, then take a new snapshot before writing its outcomes.
 4. **Upsert records with inline links.** Call `reqall action=upsert_record` with
    `project_id`, `kind`, explicit `status`, `title`, `body`, and known `links`.
    Each link has `target_id`, `target_table: records` (or `projects`), `relationship`,
@@ -85,8 +96,13 @@ Prefer durable kinds; `work` is only for a log eligible for SLEEP `work_review`
 6. **Verify exact targets.** Read back each saved record using `get_record` with
    `id` and check its project, body, kind, and status. Read back required links via
    `list_links` and check source, target, tables, and relationship. Retain verified
-   record IDs for this batch. If any record or required link failed, report partial
-   persistence and leave work pending; do not acknowledge the batch.
+   record IDs for this batch. Include every outcome written at the current work
+   revision in `record_ids`; a subset cannot clear unverified sibling outcomes.
+   Old superseded outcomes from earlier revisions need not be re-upserted or
+   included if the current batch honestly represents all snapshot work. They
+   cannot themselves serve as proof of newer work. If any record or required link
+   failed, report partial persistence and leave work pending; do not acknowledge
+   the batch.
 7. **Acknowledge the snapshot.** Only once all snapshot work is represented and
    readbacks succeed, call `reqall_session action=acknowledge
    record_ids=[<verified IDs>] work_revision=<snapshot revision>

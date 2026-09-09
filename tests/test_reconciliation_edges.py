@@ -54,6 +54,43 @@ class ReconciliationEdgesTests(unittest.TestCase):
         race.clear()
         self.assertTrue(self.acknowledge([10], read, revision)['ok'])
 
+    def test_subset_ack_retains_unverified_current_batch(self):
+        state.mark_dirty('s', 'a.py')
+        records = {rid: self.write_record(rid) for rid in (10, 11)}
+        reads = []
+        def read(action, args):
+            if action == 'get_record':
+                reads.append(args['id'])
+                return {'ok': True, 'data': records[args['id']]}
+            return {'ok': True, 'data': {'links': [], 'total': 0}}
+        before = state.load('s')
+        result = self.acknowledge([10], read)
+        self.assertFalse(result['ok'])
+        self.assertEqual(result['error'], 'unverified_batch_outcomes')
+        self.assertEqual(result['record_ids'], [11])
+        self.assertEqual(state.load('s'), before)
+        records[11]['project_id'] = 8
+        self.assertFalse(self.acknowledge([10, 11], read)['ok'])
+        self.assertTrue(state.load('s')['dirty'])
+        records[11]['project_id'] = 7
+        self.assertTrue(self.acknowledge([10, 11], read)['ok'])
+        self.assertIn(11, reads)
+        self.assertEqual(state.load('s')['acknowledged_record_ids'], [10, 11])
+
+    def test_new_batch_can_supersede_old_outcomes_without_reupserting_them(self):
+        state.mark_dirty('s', 'a.py')
+        self.write_record(10)
+        state.mark_dirty('s', 'b.py')
+        rec = self.write_record(11, body='Consolidated outcome for all work')
+        def read(action, args):
+            if action == 'get_record':
+                self.assertEqual(args['id'], 11)
+                return {'ok': True, 'data': rec}
+            return {'ok': True, 'data': {'links': [], 'total': 0}}
+        self.assertEqual(self.acknowledge([10, 11], read)['error'], 'stale_outcome')
+        self.assertTrue(self.acknowledge([11], read)['ok'])
+        self.assertFalse(state.load('s')['dirty'])
+
     def test_old_outcome_requires_same_id_reupsert_for_new_work(self):
         state.mark_dirty('s', 'a.py')
         rec = self.write_record()
@@ -68,6 +105,84 @@ class ReconciliationEdgesTests(unittest.TestCase):
         self.assertEqual(st['outcome_revisions'], {'10': st['work_revision']})
         self.assertTrue(self.acknowledge([10], read)['ok'])
         self.assertEqual(state.load('s')['outcome_revisions'], {})
+
+    def test_resolved_arch_acknowledges_design_with_prewrite_snapshot(self):
+        state.mark_dirty('s', 'design discussion')
+        revision = state.load('s')['work_revision']
+        rec = self.write_record(12, kind='arch', status='resolved')
+        def read(action, args):
+            return {'ok': True, 'data': rec if action == 'get_record' else {'links': [], 'total': 0}}
+        self.assertEqual(state.load('s')['work_revision'], revision)
+        self.assertEqual(state.load('s').get('written_intents', []), [])
+        self.assertTrue(self.acknowledge([12], read, revision)['ok'])
+        self.assertFalse(state.load('s')['dirty'])
+
+    def test_arch_outcome_revalidates_status_and_kind(self):
+        state.mark_dirty('s', 'design discussion')
+        rec = self.write_record(12, kind='arch', status='resolved')
+        def read(action, args):
+            return {'ok': True, 'data': rec if action == 'get_record' else {'links': [], 'total': 0}}
+        for kind, status in [('arch', 'open'), ('arch', None), ('arch', 'closed'),
+                             ('spec', 'resolved')]:
+            with self.subTest(kind=kind, status=status):
+                rec.update(kind=kind, status=status)
+                self.assertEqual(self.acknowledge([12], read)['error'], 'unverified_outcome')
+                self.assertTrue(state.load('s')['dirty'])
+        rec.update(kind='arch', status='resolved')
+        self.assertTrue(self.acknowledge([12], read)['ok'])
+
+    def test_resolved_arch_must_cover_other_pending_intent(self):
+        state.update('s', lambda st: st.update(selected_intents=[1], dirty=True))
+        rec = self.write_record(12, kind='arch', status='resolved')
+        links = []
+        def read(action, args):
+            if action == 'get_record':
+                return {'ok': True, 'data': rec if args['id'] == 12 else
+                        {'id': 1, 'kind': 'spec', 'status': 'open', 'project_id': 7}}
+            return {'ok': True, 'data': {'links': links, 'total': len(links)}}
+        self.assertEqual(self.acknowledge([12], read)['error'], 'unreconciled_intent')
+        links.append({'source_id': 12, 'source_table': 'records', 'target_id': 1,
+                      'target_table': 'records', 'relationship': 'blocks'})
+        self.assertFalse(self.acknowledge([12], read)['ok'])
+        links[0]['relationship'] = 'implements'
+        self.assertTrue(self.acknowledge([12], read)['ok'])
+
+    def test_open_designs_and_resolved_specs_remain_commitments(self):
+        for rid, kind, status in [(20, 'arch', 'open'), (21, 'spec', 'open'),
+                                  (22, 'spec', 'resolved'), (23, 'arch', None)]:
+            self.write_record(rid, kind=kind, status=status)
+            self.assertIn(rid, state.load('s')['written_intents'])
+            self.assertNotIn(rid, state.load('s').get('outcome_records', []))
+
+    def test_changing_selected_or_written_arch_status_cannot_self_ack(self):
+        for source in ('selected', 'written'):
+            with self.subTest(source=source):
+                state.update('s', lambda st: st.update(selected_intents=[], written_intents=[],
+                             outcome_records=[], outcome_revisions={}))
+                if source == 'selected':
+                    rec = self.write_record(12, kind='arch', status='resolved')
+                    with patch.object(client, 'mcp_call', return_value={'ok': True, 'data': rec}):
+                        self.assertTrue(workflow.handle_session({'action': 'select_intent',
+                                        'record_id': 12, 'session_id': 's'})['ok'])
+                else:
+                    self.write_record(12, kind='arch', status='open')
+                self.write_record(12, kind='arch', status='resolved')
+                self.assertFalse(self.acknowledge([12], lambda *_: self.fail('reject before readback'))['ok'])
+                self.assertTrue(state.load('s')['dirty'])
+                self.assertIn(12, state.load('s')[source + '_intents'])
+
+    def test_partial_resolved_arch_can_recover_without_becoming_intent(self):
+        rec = {'id': 12, 'kind': 'arch', 'status': 'resolved', 'project_id': 7}
+        hooks.post_tool_call('reqall', args={'action': 'upsert_record'}, session_id='s',
+            status='error', result={'ok': False, 'record_saved': True, 'data': rec, 'error': 'link failure'})
+        self.assertEqual(state.load('s')['pending_write_failures'], [12])
+        self.assertEqual(state.load('s').get('written_intents', []), [])
+        self.assertEqual(self.acknowledge([12], lambda *_: None)['error'], 'pending_write_failure')
+        revision = state.load('s')['work_revision']
+        self.write_record(12, kind='arch', status='resolved')
+        def read(action, args):
+            return {'ok': True, 'data': rec if action == 'get_record' else {'links': [], 'total': 0}}
+        self.assertTrue(self.acknowledge([12], read, revision)['ok'])
 
     def test_select_intent_accepts_only_same_project_spec_or_arch(self):
         for kind, project_id, expected in [('spec', 7, True), ('arch', 7, True),

@@ -48,6 +48,15 @@ def _same_project(st, record):
     return type(st.get('project_id')) is int and st['project_id'] == record['project_id']
 
 
+def _is_commitment(st, record):
+    # A completed standalone design decision is an outcome, not new intent.
+    # Once selected/written as intent, status changes cannot self-reconcile it.
+    return (record['id'] in st.get('selected_intents', [])
+            or record['id'] in st.get('written_intents', [])
+            or record['kind'] == 'spec'
+            or (record['kind'] == 'arch' and record.get('status') != 'resolved'))
+
+
 def track_result(sid, tool_name, args, result):
     action = args.get('action') if tool_name == 'reqall' else tool_name.lower().removeprefix('mcp__reqall__')
     if action == 'upsert_project':
@@ -84,7 +93,7 @@ def track_result(sid, tool_name, args, result):
                     pending = st.setdefault('pending_write_failures', [])
                     if record['id'] not in pending:
                         pending.append(record['id'])
-                    if record['kind'] in {'spec', 'arch'}:
+                    if _is_commitment(st, record):
                         intents = st.setdefault('written_intents', [])
                         if record['id'] not in intents:
                             intents.append(record['id'])
@@ -99,7 +108,7 @@ def track_result(sid, tool_name, args, result):
         if action == 'upsert_record':
             st['ledger_revision'] = int(st.get('ledger_revision', 0)) + 1
             st['pending_write_failures'] = [v for v in st.get('pending_write_failures', []) if v != record['id']]
-        key = 'consulted_records' if action == 'get_record' else ('written_intents' if record['kind'] in {'spec', 'arch'} else 'outcome_records')
+        key = 'consulted_records' if action == 'get_record' else ('written_intents' if _is_commitment(st, record) else 'outcome_records')
         ids = st.setdefault(key, [])
         if record['id'] not in ids:
             ids.append(record['id'])
@@ -125,6 +134,12 @@ def _acknowledge(sid, args, st):
     if any(type(outcome_revisions.get(str(rid))) is not int or
            outcome_revisions[str(rid)] != revision for rid in ids):
         return {'ok': False, 'error': 'stale_outcome'}
+    # Only this revision's persistence batch must be complete. Older outcomes
+    # may be superseded by a new consolidated write, but never reused as proof.
+    missing = {rid for rid in st.get('outcome_records', [])
+               if outcome_revisions.get(str(rid)) == revision} - set(ids)
+    if missing:
+        return {'ok': False, 'error': 'unverified_batch_outcomes', 'record_ids': sorted(missing)}
     pending = set(st.get('selected_intents', [])) | set(st.get('written_intents', []))
     covered = set()
     try:
@@ -134,7 +149,7 @@ def _acknowledge(sid, args, st):
                 return {'ok': False, 'error': 'unverified_intent'}
         for rid in ids:
             rec = _record(client.mcp_call('get_record', {'id': rid}))
-            if not rec or rec['id'] != rid or not _same_project(st, rec) or rid in pending or rec['kind'] in {'spec', 'arch'}:
+            if not rec or rec['id'] != rid or not _same_project(st, rec) or _is_commitment(st, rec):
                 return {'ok': False, 'error': 'unverified_outcome'}
             data = _payload(client.mcp_call('list_links', {'entity_id': rid, 'entity_type': 'records', 'direction': 'outgoing', 'limit': 100, 'offset': 0}))
             if not isinstance(data, dict) or not isinstance(data.get('links'), list):

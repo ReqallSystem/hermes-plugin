@@ -1,5 +1,5 @@
 name: reqall
-version: 2026.9.7
+version: 2026.9.9
 description: >
   Reqall project memory for Hermes — turn-start recall, agreed intent,
   inline record links, verified persistence acknowledgement, and SLEEP.
@@ -26,11 +26,11 @@ config_schema:
   doc_interval_min:
     type: number
     default: 10
-    description: Minimum minutes between documentation nudges; zero disables throttling.
+    description: Legacy compatibility setting; current reminders are per turn, not interval-throttled.
   persist_interval_min:
     type: number
     default: 30
-    description: Minimum minutes between turn-start dirty-work reminders; edited-code gate is per turn.
+    description: Legacy compatibility setting; current reminders are per turn, not interval-throttled.
 provides_tools:
   - reqall
   - reqall_status

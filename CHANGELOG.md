@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026.9.9
+
+- Resolve explicit `HERMES_HOME` file settings and cached settings from the same profile, never the active profile's cache.
+- Require all current-revision outcomes in acknowledgement; reject subset batches without forgetting unverified records, while allowing newer outcomes to supersede older records.
+- Allow standalone resolved architecture decisions as verified design-only outcomes. Selected/written commitments cannot self-acknowledge through status changes; pending intent still requires verified coverage links.
+- Track executed, potentially mutating terminal and Python calls even after nonzero exits or partial failures; keep blocked/unexecuted calls and failed atomic file edits clean.
+- Add offline regressions, clarify commitment versus design-outcome persistence, and label legacy interval settings as compatibility-only.
+
 ## 2026.9.7
 
 - Use canonical Hermes MCP discovery imports; remove the compatibility-expiring alias.

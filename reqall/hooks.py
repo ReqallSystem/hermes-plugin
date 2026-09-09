@@ -78,6 +78,37 @@ def _successful(result: Any, status: Any = None) -> bool:
     return all(_successful(result[k]) for k in ('result', 'data', 'structuredContent') if isinstance(result.get(k), dict))
 
 
+def _mutation_observed(tool_name: str, result: Any, status: Any = None) -> bool:
+    if tool_name not in {'terminal', 'execute_code'}:
+        # Atomic file edits still require success; a failed edit is not a write.
+        return _successful(result, status)
+    if isinstance(result, str):
+        try:
+            result = json.loads(result)
+        except ValueError:
+            return False
+    if not isinstance(result, dict):
+        return False
+    unexecuted = {'blocked', 'denied', 'cancelled', 'disabled', 'unexecuted'}
+    if (str(status).lower() in unexecuted
+        or str(result.get('status')).lower() in unexecuted
+        or result.get('executed') is False):
+        return False
+    if _successful(result, status) or result.get('executed') is True:
+        return True
+    # Nonzero process exits can follow writes. -1 is also the host's generic
+    # pre-execution error sentinel, so it alone is not execution evidence.
+    exit_code = result.get('exit_code')
+    if type(exit_code) is int and exit_code != -1:
+        return True
+    if tool_name == 'execute_code':
+        kernel = result.get('kernel')
+        count = kernel.get('execution_count') if isinstance(kernel, dict) else None
+        calls = result.get('tool_calls_made')
+        return (type(count) is int and count > 0) or (type(calls) is int and calls > 0)
+    return False
+
+
 def _bind(st: Dict[str, Any], prompt: str = '', **kwargs: Any):
     binding = bind_project(cwd=_cwd(**kwargs), prompt=prompt)
     if st.get('project_name') != binding.name:
@@ -185,7 +216,7 @@ def post_tool_call(tool_name: str = '', args: Optional[Dict] = None,
                             and client.normalize_result(result).get('record_saved'))
             if _successful({}, status) or partial_save:
                 track_result(sid, tool_name, args, result)
-        elif _successful(result, kwargs.get('status')) and _is_mutating(tool_name, args):
+        elif _is_mutating(tool_name, args) and _mutation_observed(tool_name, result, kwargs.get('status')):
             state.mark_dirty(sid, _tool_path(tool_name, args) or tool_name)
             if tool_name == 'delegate_task':
                 state.update(sid, lambda st: st.update(delegate_activity=True))
