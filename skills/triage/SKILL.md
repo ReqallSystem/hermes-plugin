@@ -1,6 +1,6 @@
 ---
 name: reqall-triage
-description: Classify incoming issues, gather structured details, and create prioritized Reqall records
+description: Triage requests into prioritized, linked records.
 ---
 
 # Triage Incoming Issue
@@ -33,12 +33,12 @@ Reqall record with priority.
 
 ## Steps
 
-1. **Identify the project** -- Use the project name provided by the hook
-   output (look for `project_name=...` in the hook message). If no hook
-   output is available, check the `REQALL_PROJECT_NAME` env var, then run
-   `git remote get-url origin` to extract the `org/repo` name, falling
-   back to the directory basename only if the git command fails. Call
-   `reqall action=upsert_project` with that exact name to get the `project_id`.
+1. **Identify the project** -- Read `reqall_session action=status` and use
+   the safe binding: explicit override → git origin → explicit labelled
+   `project_name` / `project` selection → `.machine/<hostname>/<os-user>`.
+   `REQALL_MACHINE_NAME` overrides hostname. Never use a cwd basename or a slash
+   token from prose. `reqall action=upsert_project` with the exact selected name
+   gives `project_id`. Do not migrate records or touch another profile.
 
 2. **Get the initial description** -- Ask the user to describe their issue
    or request in their own words. If they already provided a description
@@ -94,8 +94,8 @@ Reqall record with priority.
    - Show them to the user with title and body summary
    - Ask: "Is this the same issue, related, or a new issue?"
    - If duplicate: update the existing record with new details via
-     `reqall action=upsert_record` (pass its `record_id`), add a note about
-     the additional report, and stop
+     `reqall action=upsert_record` (pass its `id`), add only relevant new
+     details, verify the readback, and stop
    - If related: proceed to create a new record and link it in step 8
 
 6. **Determine priority** -- Assess priority using the Priority Scale
@@ -121,8 +121,9 @@ Reqall record with priority.
      - **Details:** all gathered structured details
      - **Reporter context:** any relevant user/session context
 
-8. **Create links** -- If step 5 found related (non-duplicate) records,
-   call `reqall action=upsert_link` for each:
+8. **Verify links included in step 7** -- If step 5 found related records,
+   include inline `links` in that `upsert_record`, then verify each result:
+
    - Bug that may be caused by an arch decision: `related`
    - Feature request that extends an existing spec: `related`
    - Bug that blocks a todo: `blocks`
@@ -134,6 +135,43 @@ Reqall record with priority.
    - Any duplicates noted
    - Suggested next steps (e.g., "This P1 bug should be investigated
      soon" or "This P4 feature request has been queued")
+
+## Inline links and verification
+
+When creating or updating a record, prefer `links` in `upsert_record`. Each entry
+explicitly sets `target_id`, `target_table` (`records` or `projects`), `relationship`,
+and `direction`. `outgoing` is this record → target; `incoming` is target → this
+record. Use `implements` for outcome → intent, `tests` for evidence → subject,
+`blocks` for blocker → blocked item, and `parent` / `related` only when justified.
+Use at most 20 inline links per upsert.
+
+Check record success and every per-link result: `action: created` / `existing`
+succeeds; `error`, a missing result, or a count mismatch is partial failure. The
+record can be saved even when links fail. Read back the exact `get_record` (`id`)
+and `list_links` targets, including endpoint tables and relationship, before success.
+
+For an existing-pair relationship with no record change, or a legacy server that
+explicitly rejects inline links, use `upsert_link` with `source_id`, `source_table`,
+`target_id`, `target_table`, and `relationship`. Reverse endpoints for incoming
+links. On an ambiguous response, inspect readbacks before retrying; retry only
+missing links, never recreate a record that already saved. Report remaining
+failures rather than treating transport success as persistence success.
+
+## Pitfalls
+
+Never persist secrets or unnecessary personal data. Prefer durable records; reserve
+`work` for ephemeral logs handled by SLEEP `work_review` → `promote` / `discard`.
+`pre_llm_call` runs once per user turn. `pre_verify` is only a file-edit finalization
+gate, not an all-turn Stop hook. There is no guaranteed pre-edit injection or
+pre-compaction persistence; act incrementally, and do not rely on hook timing.
+
+## Verification
+
+Read back the exact record and each required relationship before reporting success.
+For an agreed substantial spec or architecture choice, use `reqall-intend`; an
+unchanged existing intent is selected with `reqall_session action=select_intent`
+using `record_id` and `session_id`, then confirmed via status. Do not manufacture
+intent for a routine chore, question, or trivial fix.
 
 ## When to Skip
 

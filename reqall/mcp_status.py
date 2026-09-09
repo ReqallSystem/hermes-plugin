@@ -102,7 +102,7 @@ def probe_mcp_host() -> Dict[str, Any]:
     errors: List[str] = []
 
     try:
-        from tools.mcp_tool import get_registered_mcp_server_names  # type: ignore
+        from tools.mcp_tool_discovery import get_registered_mcp_server_names  # type: ignore
 
         registered_servers = sorted(get_registered_mcp_server_names() or [])
     except Exception as exc:  # pragma: no cover - host optional

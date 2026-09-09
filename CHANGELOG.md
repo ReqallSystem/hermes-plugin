@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026.9.9
+
+- Resolve explicit `HERMES_HOME` file settings and cached settings from the same profile, never the active profile's cache.
+- Require all current-revision outcomes in acknowledgement; reject subset batches without forgetting unverified records, while allowing newer outcomes to supersede older records.
+- Allow standalone resolved architecture decisions as verified design-only outcomes. Selected/written commitments cannot self-acknowledge through status changes; pending intent still requires verified coverage links.
+- Track executed, potentially mutating terminal and Python calls even after nonzero exits or partial failures; keep blocked/unexecuted calls and failed atomic file edits clean.
+- Add offline regressions, clarify commitment versus design-outcome persistence, and label legacy interval settings as compatibility-only.
+
+## 2026.9.7
+
+- Use canonical Hermes MCP discovery imports; remove the compatibility-expiring alias.
+- Stop cross-profile installation during registration. Authentication checks are read-only.
+- Resolve profile-local state, settings caches, and host-scoped secrets; lock state transactions across threads/processes.
+- Normalize structured MCP results and preserve partial inline-link failures without declaring persistence complete.
+- Track actual host `args`, successful mutations, and typed Reqall results. Remove ineffective deferred pre-edit recall.
+- Add explicit `reqall_session` intent selection and readback-verified acknowledgement, with work/ledger revision guards and project-isolated pending state.
+- Add reserved machine-project routing, `reqall-intend`, and inline-link workflows; preserve SLEEP work review/promote/discard.
+- Disable the unverified dirty-state clearing shortcut. Document actual turn-start/file-edit-gate limits and deferred OAuth support.
+- Add offline regression tests and smoke checks using real Hermes hook/secret-scope helpers. Replace POSIX-only locking with standard-library SQLite while retaining atomic JSON state.
+
+- Bind outcomes to their work revision; reject old records as acknowledgement of newer work.
+- Support same-ID partial-save recovery, explicit existing spec/architecture selection, and verified project initialization recovery.
+- Align AGENTS.md with verified persistence, reserved machine routing, and actual Hermes hook timing.
+
 ## 2026.8.10
 
 - **Fix:** Streamable-HTTP SSE client reads every `data:` frame and selects

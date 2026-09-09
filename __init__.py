@@ -19,7 +19,7 @@ from .reqall.hooks import (
     pre_tool_call,
     pre_verify,
 )
-from .reqall.install import ensure_installs, skip_sync
+from .reqall.install import ensure_installs
 from .reqall.mcp_status import probe_mcp_host
 from .reqall.project import bind_project
 
@@ -28,6 +28,7 @@ PLUGIN_ROOT = Path(__file__).resolve().parent
 
 SKILLS = (
     ("reqall-context", "skills/context/SKILL.md", "Gather Reqall project context before work"),
+    ("reqall-intend", "skills/intend/SKILL.md", "Record agreed intent before substantial work"),
     ("reqall-persist", "skills/persist/SKILL.md", "Persist session outcomes to Reqall"),
     ("reqall-document", "skills/document/SKILL.md", "Document one meaningful work item"),
     ("reqall-triage", "skills/triage/SKILL.md", "Triage incoming issues into Reqall"),
@@ -87,7 +88,7 @@ def register(ctx) -> None:
                 "properties": {
                     "check_auth": {
                         "type": "boolean",
-                        "description": "If true, ping upsert_project to verify auth",
+                        "description": "If true, perform a read-only list_projects auth check",
                     },
                     "ensure_install": {
                         "type": "boolean",
@@ -96,6 +97,10 @@ def register(ctx) -> None:
                             "profiles that list reqall in plugins.enabled but "
                             "have no $HERMES_HOME/plugins/reqall"
                         ),
+                    },
+                    "session_id": {
+                        "type": "string",
+                        "description": "Current session ID when host context is unavailable",
                     },
                     "cwd": {
                         "type": "string",
@@ -166,7 +171,7 @@ def register(ctx) -> None:
                     "name": {
                         "type": "string",
                         "description": (
-                            "Skill name: reqall-context, reqall-persist, "
+                            "Skill name: reqall-context, reqall-intend, reqall-persist, "
                             "reqall-document, reqall-triage, reqall-review, "
                             "reqall-sleep (reqall- prefix optional)"
                         ),
@@ -180,16 +185,46 @@ def register(ctx) -> None:
         emoji="🧠",
     )
 
+    ctx.register_tool(
+        name="reqall_session",
+        toolset="reqall",
+        schema={
+            "name": "reqall_session",
+            "description": (
+                "Inspect this session's pending Reqall work, explicitly select agreed "
+                "spec/architecture intent, or acknowledge persisted outcomes after "
+                "server readback and link verification. Capture work_revision from "
+                "status BEFORE persistence; acknowledge never clears newer work. "
+                "Supply session_id from the turn context when the host cannot supply it."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["status", "select_intent", "acknowledge"]},
+                    "session_id": {"type": "string", "description": "Current session identifier, not a project name"},
+                    "record_id": {"type": "integer", "minimum": 1, "description": "Existing agreed spec/arch for select_intent"},
+                    "record_ids": {"type": "array", "items": {"type": "integer", "minimum": 1}, "description": "Persisted outcome IDs to verify for acknowledge"},
+                    "work_revision": {"type": "integer", "minimum": 0, "description": "Revision captured from status before persisting"},
+                },
+                "required": ["action"],
+                "additionalProperties": False,
+            },
+        },
+        handler=_handle_session,
+        description="Reqall session intent and verified persistence acknowledgement",
+        emoji="🧠",
+    )
+
     ctx.register_command(
         name="reqall",
         handler=_slash_reqall,
         description=(
-            "Reqall memory: status | check | context | persist | sleep | "
-            "ensure-install | clear-dirty"
+            "Reqall memory: status | check | context | intend | persist | sleep | "
+            "ensure-install"
         ),
         args_hint=(
-            "status | check | context | persist | document | triage | review | "
-            "sleep [org/repo] | ensure-install | clear-dirty"
+            "status | check | context | intend | persist | document | triage | review | "
+            "sleep [org/repo] | ensure-install"
         ),
     )
 
@@ -217,27 +252,17 @@ def register(ctx) -> None:
         load_plugin_settings(
             {
                 "project_name": ctx.get_config("project_name"),
+                "machine_name": ctx.get_config("machine_name"),
+                "api_url": ctx.get_config("api_url"),
                 "doc_interval_min": ctx.get_config("doc_interval_min"),
                 "persist_interval_min": ctx.get_config("persist_interval_min"),
-                "skip_profile_sync": ctx.get_config("skip_profile_sync"),
             }
         )
     except Exception:
         logger.debug("reqall plugin settings unavailable (fail-open)", exc_info=True)
 
-    try:
-        if not skip_sync():
-            sync = ensure_installs(PLUGIN_ROOT, apply=True)
-            if sync.get("linked"):
-                logger.info(
-                    "reqall linked plugin into %s other Hermes home(s)",
-                    sync.get("linked"),
-                )
-        still = missing_enabled_homes()
-        if still:
-            logger.warning("%s", format_install_hint(still))
-    except Exception:
-        logger.exception("reqall profile-install sync failed (fail-open)")
+    # Loading a plugin must never install it into another profile. Cross-profile
+    # diagnostics and installation are explicit user operations only.
 
     logger.info(
         "reqall Hermes plugin registered (skills=%s)",
@@ -283,8 +308,15 @@ def _handle_reqall_skill(args: dict, **kwargs) -> str:
     )
 
 
+def _handle_session(args: dict, **kwargs) -> str:
+    from .reqall.workflow import handle_session
+
+    result = handle_session(args, **kwargs)
+    return result if isinstance(result, str) else json.dumps(result, default=str)
+
+
 def _handle_status(args: dict, **kwargs) -> str:
-    del kwargs
+    sid = kwargs.get("session_id") or kwargs.get("task_id") or args.get("session_id")
     cwd = args.get("cwd")
     binding = bind_project(cwd=cwd if isinstance(cwd, str) else None)
     project = binding.name or ""
@@ -306,7 +338,8 @@ def _handle_status(args: dict, **kwargs) -> str:
         "plugin_api_tool": "reqall",
         "plugin_settings": plugin_settings(),
         "skills": [n for n, _, _ in SKILLS],
-        "session": state.load("default"),
+        "session": state.load(str(sid)) if sid else None,
+        "session_id": sid or None,
         "mcp_host": mcp,
     }
     if args.get("ensure_install"):
@@ -335,16 +368,8 @@ def _handle_status(args: dict, **kwargs) -> str:
             + mcp.get("session_guidance", "")
         )
     if args.get("check_auth"):
-        if not key:
-            payload["auth_check"] = {"ok": False, "error": "auth_missing"}
-        elif binding.safe_to_upsert and project:
-            payload["auth_check"] = client.upsert_project(project)
-        else:
-            payload["auth_check"] = client.mcp_call("list_projects", {"limit": 1})
-            payload["auth_check_note"] = (
-                "Skipped upsert_project because the cwd is not a bound "
-                "Reqall project. Used list_projects as an auth ping."
-            )
+        payload["auth_check"] = client.mcp_call("list_projects", {"limit": 1})
+        payload["auth_check_note"] = "Read-only list_projects probe; no project was created."
     if warnings:
         payload["warning"] = " ".join(warnings)
         payload["warnings"] = warnings
@@ -384,8 +409,11 @@ def _slash_reqall(raw_args: str) -> str:
     if verb in {"ensure-install", "ensure_install", "sync-profiles"}:
         return _handle_status({"ensure_install": True})
     if verb == "clear-dirty":
-        state.clear_dirty("default")
-        return "Reqall dirty flag cleared for default session."
+        return (
+            "Unsafe clear-dirty is retired. Use reqall_session action=acknowledge "
+            "with this session_id, persisted record_ids and the work_revision "
+            "captured before persistence. Records and links are verified before clearing."
+        )
     if verb == "prompt":
         if rest:
             return json.dumps(
@@ -396,6 +424,7 @@ def _slash_reqall(raw_args: str) -> str:
         return json.dumps(client.mcp_call("list_prompts", {}), indent=2, default=str)
     skill_verbs = {
         "context": "reqall-context",
+        "intend": "reqall-intend",
         "persist": "reqall-persist",
         "document": "reqall-document",
         "triage": "reqall-triage",
@@ -415,13 +444,13 @@ def _slash_reqall(raw_args: str) -> str:
             header += f"\nProject hint: `{rest}`\n"
         if verb == "persist":
             header += (
-                "\nAfter you upsert records, call /reqall clear-dirty "
-                "so the persist nudge resets.\n"
+                "\nAfter record/link readbacks, use reqall_session action=acknowledge "
+                "with session_id, record_ids and the pre-persist work_revision.\n"
             )
         return header + "\n" + dumped.get("body", "")
     return (
-        "Usage: /reqall status | check | context | persist | document | "
-        "triage | review | sleep [org/repo] | prompt [name] | ensure-install | clear-dirty\n"
+        "Usage: /reqall status | check | context | intend | persist | document | "
+        "triage | review | sleep [org/repo] | prompt [name] | ensure-install\n"
         "Plugin API tool: reqall action=<mcp_tool_name> arguments={...}\n"
         "Skill dump (no skill_view): reqall_skill or /reqall persist|context|…\n"
         "Host MCP names: mcp__reqall__search or mcp__Reqall__search (any case)\n"
