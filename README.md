@@ -112,6 +112,9 @@ server without the tools is detected once and left alone. Session end unsubscrib
 
 Manual control: `reqall action=subscribe_project arguments={"project_id": 7}`,
 `list_subscriptions`, `poll_subscriptions` (`ack: false` peeks), `unsubscribe_project`.
+These default `subscriber` to the current session id (pass one explicitly to use a
+different cursor). Switching projects releases the previous cursor on the next turn,
+and the poll is scoped to the bound project, so another project's changes never leak in.
 Hermes hooks are per turn, so an idle session is not woken; updates land on its
 next turn.
 

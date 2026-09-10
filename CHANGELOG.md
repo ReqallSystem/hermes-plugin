@@ -10,6 +10,11 @@
 - **Feat:** `reqall` actions `subscribe_project`, `unsubscribe_project`,
   `list_subscriptions`, `poll_subscriptions`; `reqall_status` reports the session
   subscription.
+- Polls are scoped to the bound project and a project switch releases the previous
+  cursor before subscribing the new one, so another project's changes never reach a
+  turn. Manual `subscribe_project` / `unsubscribe_project` / `poll_subscriptions`
+  actions default `subscriber` to the session id. Cursors are forgotten locally only
+  after the server confirms the unsubscribe.
 - Older servers without the subscription tools are detected once per session and
   left alone; transient failures fail open and retry next turn.
 - **Fix:** turn-start recall now reads the project id from the server's actual

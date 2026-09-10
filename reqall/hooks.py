@@ -174,6 +174,9 @@ def _subscription_updates(sid: str, st: Dict[str, Any]) -> Optional[str]:
     pid = st.get('project_id')
     if type(pid) is not int or st.get('subscriptions_unavailable'):
         return None
+    # A previous binding's cursor is released before the new one is created so
+    # the two never share a (project, subscriber) row.
+    _release_stale(sid, keep=pid)
     if st.get('subscribed_project_id') != pid:
         sub = client.subscribe_project(pid, sid)
         if not _successful(sub):
@@ -184,7 +187,7 @@ def _subscription_updates(sid: str, st: Dict[str, Any]) -> Optional[str]:
             if cur.get('project_id') == pid:
                 cur['subscribed_project_id'] = pid
         state.update(sid, remember)
-    poll = client.poll_subscriptions(sid)
+    poll = client.poll_subscriptions(sid, project_id=pid)
     if not _successful(poll):
         return None
     return client.format_updates(poll, _own_record_ids(st))
@@ -288,23 +291,36 @@ def pre_verify(**kwargs: Any) -> Optional[Dict[str, str]]:
         return None
 
 
-def _release_subscription(sid: str) -> None:
-    """Drop this session's server-side cursor; a stale one only costs a row."""
-    st = state.load(sid)
-    pids = [v for v in st.get('stale_subscriptions', []) if type(v) is int]
-    if type(st.get('subscribed_project_id')) is int:
-        pids.append(st['subscribed_project_id'])
-    if not pids:
+def _unsubscribed(pid: int, sid: str) -> bool:
+    """True once the server no longer holds this cursor (or never could)."""
+    try:
+        result = client.unsubscribe_project(pid, sid, timeout=4.0)
+    except Exception:
+        logger.debug('reqall unsubscribe failed (fail-open)', exc_info=True)
+        return False
+    return _successful(result) or client.unsupported_tool(result)
+
+
+def _release_stale(sid: str, keep: Optional[int] = None) -> None:
+    """Release cursors left by earlier project bindings; keep what fails for a later attempt."""
+    stale = [v for v in dict.fromkeys(state.load(sid).get('stale_subscriptions', [])) if type(v) is int]
+    if not stale:
         return
-    def clear(cur):
-        cur.pop('subscribed_project_id', None)
-        cur.pop('stale_subscriptions', None)
-    state.update(sid, clear)
-    for pid in dict.fromkeys(pids):
-        try:
-            client.unsubscribe_project(pid, sid, timeout=4.0)
-        except Exception:
-            logger.debug('reqall unsubscribe failed (fail-open)', exc_info=True)
+    remaining = [pid for pid in stale if pid != keep and not _unsubscribed(pid, sid)]
+    def save(cur):
+        if remaining:
+            cur['stale_subscriptions'] = remaining
+        else:
+            cur.pop('stale_subscriptions', None)
+    state.update(sid, save)
+
+
+def _release_subscription(sid: str) -> None:
+    """Drop this session's server-side cursors, forgetting each only after the server confirms."""
+    _release_stale(sid)
+    pid = state.load(sid).get('subscribed_project_id')
+    if type(pid) is int and _unsubscribed(pid, sid):
+        state.update(sid, lambda cur: cur.pop('subscribed_project_id', None))
 
 
 def on_session_end(**kwargs: Any) -> None:

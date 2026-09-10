@@ -215,11 +215,19 @@ def unsupported_tool(result: Any) -> bool:
 POLL_LIMIT = 20
 
 
-def poll_subscriptions(subscriber: str, limit: int = POLL_LIMIT, env=None, timeout: float = 6.0) -> Dict[str, Any]:
-    """Drain events after this subscriber's cursor (server advances the cursor)."""
+def poll_subscriptions(subscriber: str, limit: int = POLL_LIMIT, project_id: Any = None,
+                       env=None, timeout: float = 6.0) -> Dict[str, Any]:
+    """Drain events after this subscriber's cursor (server advances the cursor).
+
+    Pass project_id to read only that project: a session that switched projects
+    must never see the previous binding's changes.
+    """
     if not subscriber:
         return {"ok": False, "error": "no_subscriber"}
-    return mcp_call("poll_subscriptions", {"subscriber": subscriber, "limit": limit}, env=env, timeout=timeout)
+    args: Dict[str, Any] = {"subscriber": subscriber, "limit": limit}
+    if type(project_id) is int:
+        args["project_id"] = project_id
+    return mcp_call("poll_subscriptions", args, env=env, timeout=timeout)
 
 
 def subscription_events(poll_result: Any, own_record_ids=()) -> list:

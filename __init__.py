@@ -144,6 +144,14 @@ def register(ctx) -> None:
                             f"One of: {', '.join(REQALL_ACTIONS)}"
                         ),
                     },
+                    "session_id": {
+                        "type": "string",
+                        "description": (
+                            "Current session ID when host context is unavailable; "
+                            "subscribe/unsubscribe/poll_subscriptions default their "
+                            "subscriber to it"
+                        ),
+                    },
                     "arguments": {
                         "type": "object",
                         "description": (
@@ -388,8 +396,13 @@ def _handle_status(args: dict, **kwargs) -> str:
     return json.dumps(payload, indent=2, default=str)
 
 
+# Subscription cursors are per session: fill in the hook's subscriber label when
+# an agent follows the documented manual controls without naming one.
+SESSION_SCOPED_ACTIONS = frozenset({"subscribe_project", "unsubscribe_project", "poll_subscriptions"})
+
+
 def _handle_reqall_action(args: dict, **kwargs) -> str:
-    del kwargs
+    sid = kwargs.get("session_id") or kwargs.get("task_id") or args.get("session_id")
     action = (args.get("action") or "").strip()
     if not action:
         return json.dumps({"ok": False, "error": "action_required", "actions": list(REQALL_ACTIONS)})
@@ -405,6 +418,8 @@ def _handle_reqall_action(args: dict, **kwargs) -> str:
     arguments = args.get("arguments") or {}
     if not isinstance(arguments, dict):
         return json.dumps({"ok": False, "error": "arguments_must_be_object"})
+    if action in SESSION_SCOPED_ACTIONS and sid and not arguments.get("subscriber"):
+        arguments = {**arguments, "subscriber": str(sid)}
     result = client.mcp_call(action, arguments)
     return json.dumps(result, indent=2, default=str)
 

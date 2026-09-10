@@ -28,11 +28,15 @@ class SubscriptionTests(unittest.TestCase):
         self.addCleanup(env.stop)
         self.calls = []
 
-    def _router(self, poll=None, subscribe=None, project=True):
+    PROJECT_IDS = {'org/repo': 7, 'org/other': 8}
+
+    def _router(self, poll=None, subscribe=None, project=True, unsubscribe=None):
         def call(tool, args=None, env=None, timeout=None):
             self.calls.append((tool, args or {}))
             if tool == 'upsert_project':
-                return {'ok': project, 'data': {'action': 'created_or_found', 'project': {'id': 7, 'name': 'org/repo'}}}
+                name = (args or {}).get('name')
+                return {'ok': project, 'data': {'action': 'created_or_found',
+                                                'project': {'id': self.PROJECT_IDS.get(name, 7), 'name': name}}}
             if tool == 'search':
                 return {'ok': True, 'data': []}
             if tool == 'list_records':
@@ -42,7 +46,7 @@ class SubscriptionTests(unittest.TestCase):
             if tool == 'poll_subscriptions':
                 return poll or _poll([])
             if tool == 'unsubscribe_project':
-                return {'ok': True, 'data': {'removed': 1}}
+                return unsubscribe or {'ok': True, 'data': {'removed': 1}}
             raise AssertionError(f'unexpected tool {tool}')
         return call
 
@@ -72,6 +76,9 @@ class SubscriptionTests(unittest.TestCase):
         self.assertEqual(self._tools('poll_subscriptions'), ['poll_subscriptions'])
         sub_args = next(a for t, a in self.calls if t == 'subscribe_project')
         self.assertEqual(sub_args, {'project_id': 7, 'subscriber': 's'})
+        poll_args = next(a for t, a in self.calls if t == 'poll_subscriptions')
+        self.assertEqual(poll_args, {'subscriber': 's', 'limit': client.POLL_LIMIT, 'project_id': 7},
+                         'poll is scoped to the bound project')
         self.assertEqual(state.load('s')['subscribed_project_id'], 7)
         self.assertNotIn('Reqall updates', first['context'], 'quiet poll injects nothing')
 
@@ -92,20 +99,42 @@ class SubscriptionTests(unittest.TestCase):
         with patch.object(client, 'mcp_call', side_effect=AssertionError('network forbidden')):
             self.assertIsNone(hooks.pre_llm_call(user_message='hi', session_id='fresh'))
 
-    def test_project_switch_resubscribes(self):
+    def test_project_switch_releases_old_cursor_and_polls_only_the_new_project(self):
         with patch.object(client, 'mcp_call', side_effect=self._router()):
             hooks.pre_llm_call(user_message='implement the widget', session_id='s')
         self.calls.clear()
         with patch.dict(os.environ, {'REQALL_PROJECT_NAME': 'org/other'}), \
              patch.object(client, 'mcp_call', side_effect=self._router()):
             hooks.pre_llm_call(user_message='implement the other widget', session_id='s')
-        self.assertEqual(self._tools('subscribe_project'), ['subscribe_project'])
+        ordered = [(t, a) for t, a in self.calls if t in {'unsubscribe_project', 'subscribe_project', 'poll_subscriptions'}]
+        self.assertEqual(ordered, [
+            ('unsubscribe_project', {'project_id': 7, 'subscriber': 's'}),
+            ('subscribe_project', {'project_id': 8, 'subscriber': 's'}),
+            ('poll_subscriptions', {'subscriber': 's', 'limit': client.POLL_LIMIT, 'project_id': 8}),
+        ], 'old cursor released before the new one exists; poll never sees project 7')
+        self.assertNotIn('stale_subscriptions', state.load('s'))
+        self.assertEqual(state.load('s')['subscribed_project_id'], 8)
+
+    def test_stale_cursor_survives_a_failed_release_until_it_succeeds(self):
+        with patch.object(client, 'mcp_call', side_effect=self._router()):
+            hooks.pre_llm_call(user_message='implement the widget', session_id='s')
+        failing = {'ok': False, 'error': 'network'}
+        with patch.dict(os.environ, {'REQALL_PROJECT_NAME': 'org/other'}), \
+             patch.object(client, 'mcp_call', side_effect=self._router(unsubscribe=failing)):
+            hooks.pre_llm_call(user_message='implement the other widget', session_id='s')
+        self.assertEqual(state.load('s')['stale_subscriptions'], [7], 'kept for a later attempt')
+        self.assertEqual(state.load('s')['subscribed_project_id'], 8)
+        self.calls.clear()
+        with patch.object(client, 'mcp_call', side_effect=self._router(unsubscribe=failing)):
+            hooks.on_session_end(session_id='s')
         self.assertEqual(state.load('s')['stale_subscriptions'], [7])
+        self.assertEqual(state.load('s')['subscribed_project_id'], 8, 'nothing forgotten while the server still holds it')
         self.calls.clear()
         with patch.object(client, 'mcp_call', side_effect=self._router()):
-            hooks.on_session_end(session_id='s')
-        self.assertEqual(self._tools('unsubscribe_project'), ['unsubscribe_project'], 'old and new share an id here; released once')
+            hooks.on_session_finalize(session_id='s')
+        self.assertEqual([a['project_id'] for t, a in self.calls if t == 'unsubscribe_project'], [7, 8])
         self.assertNotIn('stale_subscriptions', state.load('s'))
+        self.assertNotIn('subscribed_project_id', state.load('s'))
 
     def test_older_server_without_subscriptions_is_silent_and_remembered(self):
         missing = {'ok': False, 'error': {'code': -32602, 'message': 'Tool subscribe_project not found'}}
@@ -158,6 +187,20 @@ class SubscriptionTests(unittest.TestCase):
         spec.loader.exec_module(mod)
         for op in ('subscribe_project', 'unsubscribe_project', 'list_subscriptions', 'poll_subscriptions'):
             self.assertIn(op, mod.REQALL_ACTIONS)
+        # Manual controls default the cursor label to the session; an explicit one wins.
+        with patch.object(mod.client, 'mcp_call', return_value={'ok': True, 'data': {}}) as call:
+            mod._handle_reqall_action({'action': 'poll_subscriptions', 'arguments': {}}, session_id='host-sess')
+            mod._handle_reqall_action({'action': 'subscribe_project', 'arguments': {'project_id': 7, 'subscriber': 'ide'}}, session_id='host-sess')
+            mod._handle_reqall_action({'action': 'unsubscribe_project', 'arguments': {'project_id': 7}, 'session_id': 'arg-sess'})
+            mod._handle_reqall_action({'action': 'list_subscriptions', 'arguments': {}}, session_id='host-sess')
+            mod._handle_reqall_action({'action': 'poll_subscriptions', 'arguments': {}})
+        self.assertEqual([c.args for c in call.call_args_list], [
+            ('poll_subscriptions', {'subscriber': 'host-sess'}),
+            ('subscribe_project', {'project_id': 7, 'subscriber': 'ide'}),
+            ('unsubscribe_project', {'project_id': 7, 'subscriber': 'arg-sess'}),
+            ('list_subscriptions', {}),
+            ('poll_subscriptions', {}),
+        ])
 
 
 if __name__ == '__main__':
