@@ -1,0 +1,7 @@
+{
+  "literal_secret": [],
+  "shell_injection": [],
+  "unsafe_eval": [],
+  "pickle": [],
+  "sql_string_format": []
+}
