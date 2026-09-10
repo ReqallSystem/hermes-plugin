@@ -57,6 +57,10 @@ REQALL_ACTIONS = (
     "delete_project",
     "list_prompts",
     "get_prompt",
+    "subscribe_project",
+    "unsubscribe_project",
+    "list_subscriptions",
+    "poll_subscriptions",
 )
 
 
@@ -124,6 +128,8 @@ def register(ctx) -> None:
                 "Use when host tools mcp__reqall__* / mcp__Reqall__* are unavailable. "
                 "Actions: search, upsert_*, get_record, list_*, impact, sleep_*, "
                 "share_project, revoke_share, list_shares, list_prompts, get_prompt, "
+                "subscribe_project, unsubscribe_project, list_subscriptions, "
+                "poll_subscriptions (changes since your last poll), "
                 "delete_record, delete_link, delete_project. "
                 "Deletes and share/revoke only when the user explicitly asked. "
                 "Pass MCP argument fields in `arguments`."
@@ -136,6 +142,14 @@ def register(ctx) -> None:
                         "description": (
                             "Reqall operation name (e.g. upsert_record, search). "
                             f"One of: {', '.join(REQALL_ACTIONS)}"
+                        ),
+                    },
+                    "session_id": {
+                        "type": "string",
+                        "description": (
+                            "Current session ID when host context is unavailable; "
+                            "subscribe/unsubscribe/poll_subscriptions default their "
+                            "subscriber to it"
                         ),
                     },
                     "arguments": {
@@ -323,6 +337,7 @@ def _handle_status(args: dict, **kwargs) -> str:
     key = api_key()
     mcp = probe_mcp_host()
     warnings: List[str] = []
+    session = state.load(str(sid)) if sid else None
     payload: Dict[str, Any] = {
         "ok": True,
         "plugin_root": str(PLUGIN_ROOT),
@@ -338,8 +353,13 @@ def _handle_status(args: dict, **kwargs) -> str:
         "plugin_api_tool": "reqall",
         "plugin_settings": plugin_settings(),
         "skills": [n for n, _, _ in SKILLS],
-        "session": state.load(str(sid)) if sid else None,
+        "session": session,
         "session_id": sid or None,
+        "subscription": (
+            {"project_id": session.get("subscribed_project_id"), "subscriber": sid,
+             "unavailable": bool(session.get("subscriptions_unavailable"))}
+            if session is not None else None
+        ),
         "mcp_host": mcp,
     }
     if args.get("ensure_install"):
@@ -376,8 +396,13 @@ def _handle_status(args: dict, **kwargs) -> str:
     return json.dumps(payload, indent=2, default=str)
 
 
+# Subscription cursors are per session: fill in the hook's subscriber label when
+# an agent follows the documented manual controls without naming one.
+SESSION_SCOPED_ACTIONS = frozenset({"subscribe_project", "unsubscribe_project", "poll_subscriptions"})
+
+
 def _handle_reqall_action(args: dict, **kwargs) -> str:
-    del kwargs
+    sid = kwargs.get("session_id") or kwargs.get("task_id") or args.get("session_id")
     action = (args.get("action") or "").strip()
     if not action:
         return json.dumps({"ok": False, "error": "action_required", "actions": list(REQALL_ACTIONS)})
@@ -393,6 +418,8 @@ def _handle_reqall_action(args: dict, **kwargs) -> str:
     arguments = args.get("arguments") or {}
     if not isinstance(arguments, dict):
         return json.dumps({"ok": False, "error": "arguments_must_be_object"})
+    if action in SESSION_SCOPED_ACTIONS and sid and not arguments.get("subscriber"):
+        arguments = {**arguments, "subscriber": str(sid)}
     result = client.mcp_call(action, arguments)
     return json.dumps(result, indent=2, default=str)
 

@@ -1,8 +1,9 @@
 name: reqall
-version: 2026.9.9
+version: 2026.9.10
 description: >
-  Reqall project memory for Hermes — turn-start recall, agreed intent,
-  inline record links, verified persistence acknowledgement, and SLEEP.
+  Reqall project memory for Hermes — turn-start recall, project change
+  subscriptions, agreed intent, inline record links, verified persistence
+  acknowledgement, and SLEEP.
 author: ReqallSystem
 manifest_version: 1
 homepage: https://github.com/ReqallSystem/hermes-plugin

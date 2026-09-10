@@ -70,7 +70,10 @@ SLEEP retains `work_review`, `promote`, and `discard` plus its other operations.
 
 ## Actual hook timing
 
-`pre_llm_call` runs once per user turn, not between tools. Perform explicit recall
+`pre_llm_call` runs once per user turn, not between tools. It also polls the bound
+project's subscription and may inject `## Reqall updates since last turn`: changes
+from other sessions, teammates, or SLEEP. Treat them as background context; fetch
+with `get_record` before acting. `reqall action=poll_subscriptions` drains more. Perform explicit recall
 before a specific edit if needed. `pre_tool_call` does not inject remote context;
 `post_tool_call` observes results, including explicitly reported partial saves.
 `pre_verify` is a bounded file-edit finalization reminder, not an all-chat Stop hook.

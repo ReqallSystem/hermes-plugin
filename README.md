@@ -100,16 +100,34 @@ requested link result (`created`, `existing`, `error`) and use exact readbacks a
 uncertain results. `upsert_link` remains available for existing pairs or older servers.
 Never recreate a saved record merely because one link failed.
 
+## Project subscriptions
+
+Reqall can tell an agent when memories change in a project (server issue #110).
+After the session's project is bound, the plugin calls `subscribe_project` once
+(`subscriber` = the Hermes session id, so each session keeps its own cursor) and
+`poll_subscriptions` at the start of every turn. New events from other sessions,
+teammates, or SLEEP arrive as a `## Reqall updates since last turn` block; the
+session's own writes are omitted. Nothing is injected on a quiet poll, and an older
+server without the tools is detected once and left alone. Session end unsubscribes.
+
+Manual control: `reqall action=subscribe_project arguments={"project_id": 7}`,
+`list_subscriptions`, `poll_subscriptions` (`ack: false` peeks), `unsubscribe_project`.
+These default `subscriber` to the current session id (pass one explicitly to use a
+different cursor). Switching projects releases the previous cursor on the next turn,
+and the poll is scoped to the bound project, so another project's changes never leak in.
+Hermes hooks are per turn, so an idle session is not woken; updates land on its
+next turn.
+
 ## Honest lifecycle guarantees
 
 | Hook | Behavior |
 |---|---|
 | `on_session_start` | Initialize session binding without cross-profile installation |
-| `pre_llm_call` | Once per user turn: recall and pending intent/persistence guidance |
+| `pre_llm_call` | Once per user turn: recall, subscribed-project updates, pending intent/persistence guidance |
 | `pre_tool_call` | Cheap, non-blocking observer; no remote lookup and no false pre-edit injection |
 | `post_tool_call` | Successful activity tracking and typed intent/result bookkeeping |
 | `pre_verify` | Bounded edited-code persistence reminder; no permanent session latch |
-| Session end/finalize | Log outstanding work; do not claim it was saved |
+| Session end/finalize | Log outstanding work; release the project subscription cursor |
 
 Hermes does not call `pre_llm_call` between tools. The old queued “pre-edit recall”
 was too late and has been removed. Use `reqall-context` / explicit search before a
