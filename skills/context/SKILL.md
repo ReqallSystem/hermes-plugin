@@ -62,6 +62,13 @@ links. On an ambiguous response, inspect readbacks before retrying; retry only
 missing links, never recreate a record that already saved. Report remaining
 failures rather than treating transport success as persistence success.
 
+## Subscribed updates
+
+The turn-start hook subscribes the bound project and injects `## Reqall updates since
+last turn` when other sessions, teammates, or SLEEP changed records. Read the cited
+records with `get_record` before relying on them. For long tasks, drain more with
+`reqall action=poll_subscriptions`; `list_subscriptions` shows pending counts.
+
 ## Pitfalls
 
 Never persist secrets or unnecessary personal data. Prefer durable records; reserve

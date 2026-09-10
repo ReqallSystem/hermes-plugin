@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026.9.10
+
+- **Feat:** Project subscriptions (reqall_net #110). Once a session's project is bound,
+  `pre_llm_call` subscribes it once (`subscriber` = session id) and polls
+  `poll_subscriptions` at every turn start, injecting "Reqall updates since last
+  turn" for changes made by other sessions, teammates, or SLEEP. The session's own
+  writes are filtered out; session end releases the cursor.
+- **Feat:** `reqall` actions `subscribe_project`, `unsubscribe_project`,
+  `list_subscriptions`, `poll_subscriptions`; `reqall_status` reports the session
+  subscription.
+- Older servers without the subscription tools are detected once per session and
+  left alone; transient failures fail open and retry next turn.
+- **Fix:** turn-start recall now reads the project id from the server's actual
+  `upsert_project` shape (`data.project.id`), so the session binds its project on the
+  first non-trivial turn instead of waiting for an explicit `upsert_project` call.
+
 ## 2026.9.9
 
 - Resolve explicit `HERMES_HOME` file settings and cached settings from the same profile, never the active profile's cache.
