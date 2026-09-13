@@ -22,12 +22,32 @@ Deletes and sharing/revocation require the user's explicit request.
 
 ## Project routing
 
-Use `REQALL_PROJECT_NAME` / scoped `settings.project_name`, then actual git origin,
-then an explicitly labelled selection such as `project_name=org/repo`. Otherwise
-use the reserved `.machine/<short-host>/<os-user>` binding. `REQALL_MACHINE_NAME`
-or scoped `settings.machine_name` provides stable machine identity. Never infer a
-project from directory basenames, arbitrary prose, URLs, or paths like `src/auth.py`.
-Route account-wide preferences deliberately to `.user`. Do not migrate old records.
+Read `reqall_session action=status`: its bound session identity is authoritative
+for recall, work, persistence, and verification. Preserve explicit operation targets
+(including SLEEP) and `.user`; do not independently rediscover identity between steps.
+Automatic precedence: trimmed `REQALL_PROJECT_NAME` / scoped `settings.project_name`
+→ network git origin → explicitly labelled `project_name` / `project` prompt or
+retained session selection → nearest valid `.reqall.yml` / `.reqall.yaml` → nearest
+valid package (`package.json` > `go.mod` > `Cargo.toml` per directory) → exact path
+relative to `REQALL_WORKSPACE_ROOT` or nearest `.reqall-workspace` marker → reserved
+`.machine/<short-lower-host>/<os-user>`. `REQALL_MACHINE_NAME` / scoped
+`settings.machine_name` overrides the whole host (dots retained); use actual OS user.
+Never use an unconstrained cwd basename, arbitrary prose path, or synthetic report
+example. Git accepts network HTTP(S)/SSH/git URLs or SCP, not local/file origins;
+retain final two path segments, trimming trailing slashes and `.git`, without migration.
+Read regular UTF-8 metadata files of at most 64 KiB. YAML supports simple top-level
+`project` / `name` strings (project preferred, .yml before .yaml), matching quotes and
+comments; reject non-string values, malformed quoting and contradictory duplicates.
+JSON `name` must be a string; only valid npm `@scope/name` removes one `@`. Go preserves
+the complete module path after comments; Cargo reads only a simple quoted `[package]`
+name, never bin/dependency names. Validate ASCII alphanumeric `._-` slash segments
+before normalization; reject absolute/drive/UNC, backslash/tilde, empty/dot/dotdot
+segments. Explicit metadata named `src` is valid. Stop ancestor scans at a containing
+workspace root inclusively. Workspace settings default to process environment;
+relative roots resolve from cwd, `~/` from home. Use real paths for containment;
+invalid/nonancestor explicit roots do not select a marker. Root equality produces
+no relative identity; keep every relative segment. Preserve manually selected names
+apart from outer whitespace; never migrate old records or touch another profile.
 If automatic initialization failed, an explicit successful `upsert_project` for the
 exact binding can initialize its missing session project ID; check session status.
 Plugin loading and status checks must not install into sibling profiles. Request

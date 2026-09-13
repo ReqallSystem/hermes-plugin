@@ -1,0 +1,582 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "machine-root",
+      "expected": "$machine",
+      "source": "machine"
+    },
+    {
+      "id": "explicit-trim",
+      "expected": ".user",
+      "source": "override",
+      "env": {
+        "REQALL_PROJECT_NAME": "  .user  "
+      },
+      "remote": "https://github.com/acme/repo.git"
+    },
+    {
+      "id": "blank-override",
+      "expected": "acme/repo",
+      "source": "git",
+      "env": {
+        "REQALL_PROJECT_NAME": "  "
+      },
+      "remote": "https://github.com/acme/repo.git"
+    },
+    {
+      "id": "git-https",
+      "expected": "acme/repo",
+      "source": "git",
+      "remote": "https://github.com/acme/repo.git",
+      "prompt": "project: lower/priority",
+      "files": {
+        ".reqall.yml": "project: lower/file"
+      }
+    },
+    {
+      "id": "git-scp",
+      "expected": "acme/repo",
+      "source": "git",
+      "remote": "git@github.com:acme/repo.git",
+      "prompt": "project: lower/priority",
+      "files": {
+        ".reqall.yml": "project: lower/file"
+      }
+    },
+    {
+      "id": "git-ssh",
+      "expected": "acme/repo",
+      "source": "git",
+      "remote": "ssh://git@github.com/acme/repo.git",
+      "prompt": "project: lower/priority",
+      "files": {
+        ".reqall.yml": "project: lower/file"
+      }
+    },
+    {
+      "id": "git-slash",
+      "expected": "acme/repo",
+      "source": "git",
+      "remote": "https://github.com/acme/repo.git/",
+      "prompt": "project: lower/priority",
+      "files": {
+        ".reqall.yml": "project: lower/file"
+      }
+    },
+    {
+      "id": "git-subgroups-compat",
+      "expected": "sub/repo",
+      "source": "git",
+      "remote": "https://gitlab.com/group/sub/repo.git"
+    },
+    {
+      "id": "reject-local-git-posix",
+      "expected": "acme/local",
+      "source": "reqall_yml",
+      "remote": "/srv/repos/local.git",
+      "files": {
+        ".reqall.yml": "project: acme/local"
+      }
+    },
+    {
+      "id": "reject-local-git-windows",
+      "expected": "acme/local",
+      "source": "reqall_yml",
+      "remote": "C:/repos/local.git",
+      "files": {
+        ".reqall.yml": "project: acme/local"
+      }
+    },
+    {
+      "id": "reject-local-git-file",
+      "expected": "acme/local",
+      "source": "reqall_yml",
+      "remote": "file:///srv/repos/local.git",
+      "files": {
+        ".reqall.yml": "project: acme/local"
+      }
+    },
+    {
+      "id": "label-unquoted",
+      "expected": "acme/notes",
+      "source": "prompt",
+      "prompt": "Please use project_name=acme/notes: refactor it.",
+      "files": {
+        ".reqall.yml": "project: lower/file"
+      }
+    },
+    {
+      "id": "label-quoted",
+      "expected": "acme/notes",
+      "source": "prompt",
+      "prompt": "project: \"acme/notes\"",
+      "files": {
+        ".reqall.yml": "project: lower/file"
+      }
+    },
+    {
+      "id": "label-single",
+      "expected": "acme/notes",
+      "source": "prompt",
+      "prompt": "project='acme/notes'",
+      "files": {
+        ".reqall.yml": "project: lower/file"
+      }
+    },
+    {
+      "id": "label-backtick",
+      "expected": "acme/notes",
+      "source": "prompt",
+      "prompt": "project_name=`acme/notes`",
+      "files": {
+        ".reqall.yml": "project: lower/file"
+      }
+    },
+    {
+      "id": "incidental-prose",
+      "expected": "$machine",
+      "source": "machine",
+      "prompt": "Read src/auth.py and https://example.com/acme/repo; no identity selection."
+    },
+    {
+      "id": "yaml-basic",
+      "expected": "acme/notes",
+      "source": "reqall_yml",
+      "files": {
+        ".reqall.yml": "project: acme/notes\n"
+      }
+    },
+    {
+      "id": "yaml-alias",
+      "expected": "acme/notes",
+      "source": "reqall_yml",
+      "files": {
+        ".reqall.yaml": "name: 'acme/notes' # annotation\n"
+      }
+    },
+    {
+      "id": "yaml-project-priority",
+      "expected": "acme/notes",
+      "source": "reqall_yml",
+      "files": {
+        ".reqall.yml": "name: other/name\nproject: acme/notes\n"
+      }
+    },
+    {
+      "id": "yaml-extension-priority",
+      "expected": "acme/yml",
+      "source": "reqall_yml",
+      "files": {
+        ".reqall.yml": "project: acme/yml",
+        ".reqall.yaml": "project: acme/yaml"
+      }
+    },
+    {
+      "id": "yaml-before-package",
+      "expected": "acme/parent",
+      "source": "reqall_yml",
+      "cwd": "child",
+      "files": {
+        ".reqall.yml": "project: acme/parent",
+        "child/package.json": "{\"name\":\"closer-package\"}"
+      }
+    },
+    {
+      "id": "yaml-nearest-valid",
+      "expected": "acme/parent",
+      "source": "reqall_yml",
+      "cwd": "child",
+      "files": {
+        ".reqall.yml": "project: acme/parent",
+        "child/.reqall.yml": "project: /absolute/path"
+      }
+    },
+    {
+      "id": "metadata-generic-name-valid",
+      "expected": "src",
+      "source": "reqall_yml",
+      "files": {
+        ".reqall.yml": "project: src"
+      }
+    },
+    {
+      "id": "reject-metadata-posix",
+      "expected": "fallback-package",
+      "source": "package",
+      "files": {
+        ".reqall.yml": "project: /home/alice/private",
+        "package.json": "{\"name\":\"fallback-package\"}"
+      }
+    },
+    {
+      "id": "reject-metadata-drive",
+      "expected": "fallback-package",
+      "source": "package",
+      "files": {
+        ".reqall.yml": "project: C:/private",
+        "package.json": "{\"name\":\"fallback-package\"}"
+      }
+    },
+    {
+      "id": "reject-metadata-unc",
+      "expected": "fallback-package",
+      "source": "package",
+      "files": {
+        ".reqall.yml": "project: \\\\server\\share",
+        "package.json": "{\"name\":\"fallback-package\"}"
+      }
+    },
+    {
+      "id": "reject-metadata-dotdot",
+      "expected": "fallback-package",
+      "source": "package",
+      "files": {
+        ".reqall.yml": "project: acme/../other",
+        "package.json": "{\"name\":\"fallback-package\"}"
+      }
+    },
+    {
+      "id": "reject-metadata-dot",
+      "expected": "fallback-package",
+      "source": "package",
+      "files": {
+        ".reqall.yml": "project: acme/./other",
+        "package.json": "{\"name\":\"fallback-package\"}"
+      }
+    },
+    {
+      "id": "reject-metadata-empty",
+      "expected": "fallback-package",
+      "source": "package",
+      "files": {
+        ".reqall.yml": "project: acme//other",
+        "package.json": "{\"name\":\"fallback-package\"}"
+      }
+    },
+    {
+      "id": "reject-metadata-tilde",
+      "expected": "fallback-package",
+      "source": "package",
+      "files": {
+        ".reqall.yml": "project: ~/private",
+        "package.json": "{\"name\":\"fallback-package\"}"
+      }
+    },
+    {
+      "id": "reject-yaml-bool",
+      "expected": "fallback-package",
+      "source": "package",
+      "files": {
+        ".reqall.yml": "project: true",
+        "package.json": "{\"name\":\"fallback-package\"}"
+      }
+    },
+    {
+      "id": "reject-yaml-null",
+      "expected": "fallback-package",
+      "source": "package",
+      "files": {
+        ".reqall.yml": "project: null",
+        "package.json": "{\"name\":\"fallback-package\"}"
+      }
+    },
+    {
+      "id": "reject-yaml-number",
+      "expected": "fallback-package",
+      "source": "package",
+      "files": {
+        ".reqall.yml": "project: 123",
+        "package.json": "{\"name\":\"fallback-package\"}"
+      }
+    },
+    {
+      "id": "reject-yaml-quote",
+      "expected": "fallback-package",
+      "source": "package",
+      "files": {
+        ".reqall.yml": "project: \"acme/notes'",
+        "package.json": "{\"name\":\"fallback-package\"}"
+      }
+    },
+    {
+      "id": "reject-yaml-duplicate",
+      "expected": "fallback-package",
+      "source": "package",
+      "files": {
+        ".reqall.yml": "project: first/name\nproject: other/name",
+        "package.json": "{\"name\":\"fallback-package\"}"
+      }
+    },
+    {
+      "id": "npm-scope",
+      "expected": "acme/widgets",
+      "source": "package",
+      "files": {
+        "package.json": "{\"name\":\"@acme/widgets\"}"
+      }
+    },
+    {
+      "id": "npm-numeric-rejected",
+      "expected": "$machine",
+      "source": "machine",
+      "files": {
+        "package.json": "{\"name\":123}"
+      }
+    },
+    {
+      "id": "npm-malformed-rejected",
+      "expected": "$machine",
+      "source": "machine",
+      "files": {
+        "package.json": "{\"name\":"
+      }
+    },
+    {
+      "id": "package-nearest",
+      "expected": "child-package",
+      "source": "package",
+      "cwd": "child",
+      "files": {
+        "package.json": "{\"name\":\"parent-package\"}",
+        "child/Cargo.toml": "[package]\nname = \"child-package\""
+      }
+    },
+    {
+      "id": "package-type-priority",
+      "expected": "npm-package",
+      "source": "package",
+      "files": {
+        "package.json": "{\"name\":\"npm-package\"}",
+        "go.mod": "module example.com/acme/go",
+        "Cargo.toml": "[package]\nname=\"cargo-package\""
+      }
+    },
+    {
+      "id": "go-comments-version",
+      "expected": "example.com/acme/widgets/v2",
+      "source": "package",
+      "files": {
+        "go.mod": "// header\n\nmodule example.com/acme/widgets/v2\n\ngo 1.22\n"
+      }
+    },
+    {
+      "id": "go-empty",
+      "expected": "$machine",
+      "source": "machine",
+      "files": {
+        "go.mod": ""
+      }
+    },
+    {
+      "id": "cargo-package-not-bin",
+      "expected": "real-package",
+      "source": "package",
+      "files": {
+        "Cargo.toml": "[[bin]]\nname = \"helper\"\n[package]\nname = \"real-package\"\n"
+      }
+    },
+    {
+      "id": "cargo-no-package",
+      "expected": "$machine",
+      "source": "machine",
+      "files": {
+        "Cargo.toml": "[[bin]]\nname = \"helper\"\n"
+      }
+    },
+    {
+      "id": "invalid-utf8-.reqall.yml",
+      "expected": "$machine",
+      "source": "machine",
+      "binary_files": {
+        ".reqall.yml": [
+          255,
+          254
+        ]
+      }
+    },
+    {
+      "id": "invalid-utf8-package.json",
+      "expected": "$machine",
+      "source": "machine",
+      "binary_files": {
+        "package.json": [
+          255,
+          254
+        ]
+      }
+    },
+    {
+      "id": "invalid-utf8-go.mod",
+      "expected": "$machine",
+      "source": "machine",
+      "binary_files": {
+        "go.mod": [
+          255,
+          254
+        ]
+      }
+    },
+    {
+      "id": "invalid-utf8-Cargo.toml",
+      "expected": "$machine",
+      "source": "machine",
+      "binary_files": {
+        "Cargo.toml": [
+          255,
+          254
+        ]
+      }
+    },
+    {
+      "id": "oversize-metadata",
+      "expected": "$machine",
+      "source": "machine",
+      "repeat_files": {
+        ".reqall.yml": [
+          "#",
+          65537
+        ]
+      }
+    },
+    {
+      "id": "workspace-marker",
+      "expected": "team/notes",
+      "source": "workspace_relative",
+      "cwd": "team/notes"
+    },
+    {
+      "id": "workspace-env",
+      "expected": "team/notes",
+      "source": "workspace_relative",
+      "cwd": "team/notes",
+      "marker": false,
+      "env": {
+        "REQALL_WORKSPACE_ROOT": "$root"
+      }
+    },
+    {
+      "id": "workspace-relative-setting",
+      "expected": "team/notes",
+      "source": "workspace_relative",
+      "cwd": "team/notes",
+      "marker": false,
+      "env": {
+        "REQALL_WORKSPACE_ROOT": "../.."
+      }
+    },
+    {
+      "id": "workspace-no-basename",
+      "expected": "$machine",
+      "source": "machine",
+      "cwd": "notes",
+      "marker": false
+    },
+    {
+      "id": "workspace-keep-segments",
+      "expected": "src/notes",
+      "source": "workspace_relative",
+      "cwd": "src/notes"
+    },
+    {
+      "id": "workspace-generic-leaf",
+      "expected": "src",
+      "source": "workspace_relative",
+      "cwd": "src"
+    },
+    {
+      "id": "workspace-nonancestor",
+      "expected": "$machine",
+      "source": "machine",
+      "cwd": "team/notes",
+      "env": {
+        "REQALL_WORKSPACE_ROOT": "$root/other"
+      },
+      "directories": [
+        "other"
+      ]
+    },
+    {
+      "id": "workspace-missing-setting",
+      "expected": "$machine",
+      "source": "machine",
+      "cwd": "team/notes",
+      "env": {
+        "REQALL_WORKSPACE_ROOT": "$root/missing"
+      }
+    },
+    {
+      "id": "workspace-boundary",
+      "expected": "leaf",
+      "source": "workspace_relative",
+      "cwd": "workspace/leaf",
+      "files": {
+        "package.json": "{\"name\":\"outside-package\"}",
+        "workspace/.reqall-workspace": ""
+      }
+    },
+    {
+      "id": "yaml-continuation-rejected",
+      "expected": "$machine",
+      "source": "machine",
+      "files": {
+        ".reqall.yml": "project: wrong\n  continuation\n"
+      }
+    },
+    {
+      "id": "yaml-nested-continuation-rejected",
+      "expected": "$machine",
+      "source": "machine",
+      "files": {
+        ".reqall.yml": "project: wrong\n  child: nested\n"
+      }
+    },
+    {
+      "id": "cargo-multiline-content-not-identity",
+      "expected": "$machine",
+      "source": "machine",
+      "files": {
+        "Cargo.toml": "[package]\ndescription = \"\"\"\nname = \"wrong\"\n\"\"\"\n"
+      }
+    },
+    {
+      "id": "go-comment-no-token-concatenation",
+      "expected": "$machine",
+      "source": "machine",
+      "files": {
+        "go.mod": "module example.com/ac/* comment */me/repo\n"
+      }
+    },
+    {
+      "id": "label-comma-boundary",
+      "expected": "acme/notes",
+      "source": "prompt",
+      "prompt": "project_name=acme/notes,next steps"
+    },
+    {
+      "id": "label-synthetic-report-ignored",
+      "expected": "$machine",
+      "source": "machine",
+      "prompt": "[ASYNC DELEGATION BATCH COMPLETE \u2014 test]\nproject: accidental/example"
+    },
+    {
+      "id": "machine-legacy-punctuation",
+      "expected": ".machine/my!host.example/$user",
+      "source": "machine",
+      "env": {
+        "REQALL_MACHINE_NAME": " My!Host.Example "
+      }
+    },
+    {
+      "id": "workspace-process-environment",
+      "expected": "team/notes",
+      "source": "workspace_relative",
+      "cwd": "team/notes",
+      "marker": false,
+      "env": {
+        "REQALL_WORKSPACE_ROOT": "$root"
+      },
+      "use_default_env": true
+    }
+  ]
+}

@@ -288,6 +288,45 @@ class ReqallPluginTests(unittest.TestCase):
         self.assertTrue(binding.name.startswith(".machine/"))
         self.assertEqual(self.project.resolve_project_name("/tmp", env={}), binding.name)
 
+    def test_reqall_yml_binds_before_package_and_machine(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "workspace" / "widget"
+            nested = root / "src"
+            nested.mkdir(parents=True)
+            (root / ".reqall.yml").write_text("project: acme/widget\n", encoding="utf-8")
+            (root / "package.json").write_text('{"name":"ignored"}\n', encoding="utf-8")
+            binding = self.project.bind_project(cwd=str(nested), env={})
+            self.assertEqual(binding.source, "reqall_yml")
+            self.assertEqual(binding.name, "acme/widget")
+
+    def test_package_json_scoped_name_without_git(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "pkg"
+            root.mkdir()
+            (root / "package.json").write_text('{"name":"@acme/widget"}\n', encoding="utf-8")
+            binding = self.project.bind_project(cwd=str(root), env={})
+            self.assertEqual(binding.source, "package")
+            self.assertEqual(binding.name, "acme/widget")
+
+    def test_workspace_relative_path_without_git(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = Path(tmp) / "Work"
+            leaf = ws / "personal" / "notes"
+            leaf.mkdir(parents=True)
+            (ws / ".reqall-workspace").write_text("", encoding="utf-8")
+            binding = self.project.bind_project(cwd=str(leaf), env={})
+            self.assertEqual(binding.source, "workspace_relative")
+            self.assertEqual(binding.name, "personal/notes")
+            self.assertNotIn(str(tmp), binding.name)
+
+    def test_absolute_path_names_are_never_used(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            leaf = Path(tmp) / "lonely"
+            leaf.mkdir()
+            binding = self.project.bind_project(cwd=str(leaf), env={})
+            self.assertEqual(binding.source, "machine")
+            self.assertTrue(binding.name.startswith(".machine/"))
+
     def test_prompt_org_repo_binds(self):
         binding = self.project.bind_project(
             cwd="/home/ubuntu",

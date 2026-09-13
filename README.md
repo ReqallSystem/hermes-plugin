@@ -52,15 +52,66 @@ and failed inline links. A partially successful write is not retried automatical
 
 ## Project routing
 
-1. `REQALL_PROJECT_NAME` or scoped `settings.project_name`.
-2. Actual git `origin` repository identity.
-3. Explicit labelled project selection in the prompt (`project_name=org/repo`).
-4. Reserved `.machine/<short-host>/<os-user>` project.
+Read `reqall_session action=status`: its bound session identity is authoritative
+for recall, work, persistence, and verification. Do not recompute a different name
+between steps. Preserve deliberate operation targets (including SLEEP) and `.user`.
+Automatic precedence: trimmed `REQALL_PROJECT_NAME` / scoped `settings.project_name`
+→ network git origin → explicit labelled `project_name` / `project` prompt or retained
+session selection → nearest valid `.reqall.yml` / `.reqall.yaml` → nearest valid
+package (`package.json` > `go.mod` > `Cargo.toml` per directory) → exact path relative
+to `REQALL_WORKSPACE_ROOT` or nearest `.reqall-workspace` marker → reserved
+`.machine/<short-lower-host>/<os-user>`. `REQALL_MACHINE_NAME` / scoped
+`settings.machine_name` overrides the whole host (dots retained); use actual OS user.
+Never use an unconstrained cwd basename, incidental prose path, or synthetic report
+example. Git accepts HTTP(S)/SSH/git URLs or SCP, not local/file origins; retain
+final two path segments, trimming trailing slashes and `.git`, without migrations.
+Use only regular UTF-8 metadata files of at most 64 KiB. YAML supports simple
+top-level `project` / `name` strings (project preferred, .yml before .yaml), matching
+quotes and comments; reject null/boolean/numeric values, malformed quoting and
+contradictory duplicates. JSON `name` must be a string; only valid npm `@scope/name`
+removes one `@`. Go preserves the complete module path after comments; Cargo reads
+only a simple quoted `[package]` name, never bin/dependency names. Validate ASCII
+alphanumeric `._-` slash segments before normalization; reject absolute/drive/UNC,
+backslash/tilde and empty/dot/dotdot segments. Metadata named `src` is valid.
+Scan nearest valid ancestors, stopping at a containing workspace root inclusively.
+Workspace settings default to process environment; relative roots resolve from cwd,
+`~/` from home. Resolve real paths before containment; reject symlink escapes and
+invalid/nonancestor configured roots without marker fallback. Root equality gives
+no relative identity. Keep every relative segment. Explicit names are preserved,
+not subjected to new metadata validation. Never migrate records or touch profiles.
+Use `upsert_project` with the exact binding only when needed to obtain `project_id`.
 
-Use `REQALL_MACHINE_NAME` or `settings.machine_name` for stable CI/container identity.
-Directory basenames and ordinary prose paths such as `src/auth.py` never become
-project names. Existing records are not renamed or migrated. Deliberately route
-account-wide preferences to `.user`; do not accidentally record them as repo work.
+Labels accept `project` or `project_name`, `:` or `=`, with unquoted, single/double
+quoted or backtick values. Only unquoted trailing sentence punctuation is stripped.
+A real prompt selection survives subsequent turns unless a higher-priority source
+or a new genuine selection replaces it. Async delegation completion/failure reports
+are not selection prompts; quoted examples in them must not rebind the session.
+This guard is conservative because the host hook supplies notification text without
+a trusted synthetic flag. It does not repair already-misbound installed sessions.
+
+Supported scalar examples (not full YAML/TOML parsers):
+
+```yaml
+# .reqall.yml: top-level only; name is an alias
+project: 'acme/notes' # portable identity
+```
+
+```text
+# go.mod: // or block comments may precede a module declaration
+module example.com/acme/notes/v2
+```
+
+```toml
+# Cargo.toml: matching quotes, optional indentation and trailing comment
+[package]
+name = "notes" # never read [[bin]] names
+```
+
+Nested YAML, aliases, multiline scalars, escaped/complex quoted declarations and
+other unsupported declarations are ignored, not interpreted as project identities.
+Per-directory package precedence applies before moving to the parent; YAML across
+the bounded ancestor chain precedes all package metadata. Discovery is client-side,
+not server filesystem scanning, and does not rename or migrate existing records.
 
 ## Tools and skills
 
@@ -105,9 +156,11 @@ Never recreate a saved record merely because one link failed.
 Reqall can tell an agent when memories change in a project (server issue #110).
 After the session's project is bound, the plugin calls `subscribe_project` once
 (`subscriber` = the Hermes session id, so each session keeps its own cursor) and
-`poll_subscriptions` at the start of every turn. New events from other sessions,
-teammates, or SLEEP arrive as a `## Reqall updates since last turn` block; the
-session's own writes are omitted. Nothing is injected on a quiet poll, and an older
+`poll_subscriptions` at the start of every turn. Native `reqall` writes send a
+stable `hermes:<session>` origin label when the server schema allows it (not the
+subscription subscriber). New events from other sessions, teammates, or SLEEP
+arrive as a `## Reqall updates since last turn` block; only `actor=self` events
+with this session's origin label are omitted. Nothing is injected on a quiet poll, and an older
 server without the tools is detected once and left alone. Session end unsubscribes.
 
 Manual control: `reqall action=subscribe_project arguments={"project_id": 7}`,

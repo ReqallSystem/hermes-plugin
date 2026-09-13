@@ -11,7 +11,7 @@ import re
 from typing import Any, Dict, Optional
 
 from . import client, state
-from .project import bind_project, conceptual_query
+from .project import bind_project, conceptual_query, extract_project_hint
 
 logger = logging.getLogger(__name__)
 CODING_HINT = re.compile(r'\b(implement|update|change|edit|fix|debug|bug|refactor|migrat|architect|design|create|add|remove|test|build|review|audit|inspect|assess|examine|research|analy[sz]e|investigate|diagnose|release|deploy|document|wire|hook|plugin|persist|sleep)\w*\b', re.I)
@@ -110,7 +110,11 @@ def _mutation_observed(tool_name: str, result: Any, status: Any = None) -> bool:
 
 
 def _bind(st: Dict[str, Any], prompt: str = '', **kwargs: Any):
-    binding = bind_project(cwd=_cwd(**kwargs), prompt=prompt)
+    selected = (extract_project_hint(prompt) or st.get('prompt_project_name')
+                or (st.get('project_name') if st.get('project_source') == 'prompt' else None))
+    if selected:
+        st['prompt_project_name'] = selected
+    binding = bind_project(cwd=_cwd(**kwargs), prompt=prompt, selected=selected)
     if st.get('project_name') != binding.name:
         st['project_id'] = None
         # The subscription cursor belongs to the old project; release it at session end.
@@ -143,7 +147,10 @@ def on_session_start(**kwargs: Any) -> None:
     try:
         sid = _session_id(**kwargs)
         if sid:
-            state.update(sid, lambda st: _bind(st, **kwargs))
+            def start(st):
+                _bind(st, **kwargs)
+                _ensure_origin(st, sid)
+            state.update(sid, start)
     except Exception:
         logger.exception('reqall session start failed (fail-open)')
 
@@ -158,11 +165,17 @@ def _persist_nudge(project: Optional[str], paths: str, source: str) -> str:
     )
 
 
-def _own_record_ids(st: Dict[str, Any]) -> list:
-    ids = []
-    for key in ('written_intents', 'outcome_records', 'pending_write_failures'):
-        ids.extend(v for v in st.get(key, []) if type(v) is int)
-    return ids
+def _ensure_origin(st: Dict[str, Any], sid: str) -> str:
+    existing = st.get('origin_session_id')
+    if client.valid_origin_label(existing):
+        return existing
+    label = client.origin_label(sid)
+    st['origin_session_id'] = label
+    return label
+
+
+def _own_origin(st: Dict[str, Any], sid: str) -> Optional[str]:
+    return _ensure_origin(st, sid)
 
 
 def _subscription_updates(sid: str, st: Dict[str, Any]) -> Optional[str]:
@@ -190,7 +203,7 @@ def _subscription_updates(sid: str, st: Dict[str, Any]) -> Optional[str]:
     poll = client.poll_subscriptions(sid, project_id=pid)
     if not _successful(poll):
         return None
-    return client.format_updates(poll, _own_record_ids(st))
+    return client.format_updates(poll, _own_origin(st, sid))
 
 
 def pre_llm_call(**kwargs: Any) -> Optional[Dict[str, str]]:
@@ -202,6 +215,7 @@ def pre_llm_call(**kwargs: Any) -> Optional[Dict[str, str]]:
         bindings = []
         def begin(st):
             bindings.append(_bind(st, prompt=prompt, **kwargs))
+            _ensure_origin(st, sid)
             st.update(last_user_prompt=prompt[:500], persist_nudge_sent=False)
             st.pop('last_pre_edit_note', None)
             st.pop('pending_doc_nudge', None)

@@ -140,7 +140,8 @@ def api_key_source(env: Dict[str, str] | None = None) -> str:
 
 def machine_name_override(env: Mapping[str, str] | None = None) -> str:
     e = env if env is not None else os.environ
-    return str(e.get("REQALL_MACHINE_NAME") or _merged_settings(env).get("machine_name") or "").strip()
+    override = (e.get("REQALL_MACHINE_NAME") or "").strip()
+    return override or str(_merged_settings(env).get("machine_name") or "").strip()
 
 
 def project_name_override(env: Mapping[str, str] | None = None) -> str:

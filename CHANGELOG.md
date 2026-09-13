@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026.9.13
+
+- **Feat:** Originating session attribution on native `reqall` writes. Event-producing
+  tools (`upsert_record`, `delete_record`, `upsert_link`, `delete_link`, `sleep_apply`,
+  `delete_project`) send `session_id=hermes:<session>` when `tools/list` advertises the
+  field; older servers omit it. The label is stored on session state and is not the
+  subscription `subscriber`.
+- Subscription echo suppression drops only `actor=self` with this session's origin
+  label. Unattributed, other-session, and later edits of the same record still inject.
+- **Feat:** Portable local project identity: nearest `.reqall.yml` / package metadata /
+  workspace-relative path before `.machine/…`. Ignore async-delegation reports as
+  project selections; keep an explicit prompt selection across turns.
+
 ## 2026.9.10
 
 - **Feat:** Project subscriptions (reqall_net #110). Once a session's project is bound,

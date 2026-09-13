@@ -16,6 +16,44 @@ logger = logging.getLogger(__name__)
 
 TIMEOUT_S = 12.0
 
+# Originating agent session (not subscribe subscriber / MCP transport).
+ORIGIN_LABEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+EVENT_WRITE_TOOLS = frozenset(
+    {
+        "upsert_record",
+        "delete_record",
+        "upsert_link",
+        "delete_link",
+        "sleep_apply",
+        "delete_project",
+    }
+)
+_session_id_tools: Optional[frozenset] = None
+
+
+def valid_origin_label(value: Any) -> bool:
+    return isinstance(value, str) and bool(ORIGIN_LABEL_RE.fullmatch(value))
+
+
+def origin_label(session_id: str) -> str:
+    """Stable plugin-prefixed label; never a secret, never the subscriber field."""
+    body = "".join(c if c.isalnum() or c in "._:-" else "_" for c in str(session_id or "session"))
+    body = body.strip("._:-") or "session"
+    if not body[0].isalnum():
+        body = "s" + body
+    return ("hermes:" + body)[:128]
+
+
+def reset_session_id_schema_cache() -> None:
+    global _session_id_tools
+    _session_id_tools = None
+
+
+def set_session_id_tools(names: Optional[Any]) -> None:
+    """Test helper: pin which tools advertise session_id (None rediscovers)."""
+    global _session_id_tools
+    _session_id_tools = None if names is None else frozenset(names)
+
 
 def normalize_result(payload: Any) -> Dict[str, Any]:
     """Normalize RPC/MCP/Reqall envelopes without mistaking transport for success.
@@ -106,9 +144,9 @@ def parse_sse_jsonrpc(raw: str, request_id: Optional[str] = None) -> Any:
     return events[-1]
 
 
-def mcp_call(
-    tool_name: str,
-    arguments: Optional[Dict[str, Any]] = None,
+def mcp_rpc(
+    method: str,
+    params: Optional[Dict[str, Any]] = None,
     env: Optional[Dict[str, str]] = None,
     timeout: float = TIMEOUT_S,
 ) -> Dict[str, Any]:
@@ -122,8 +160,8 @@ def mcp_call(
         {
             "jsonrpc": "2.0",
             "id": req_id,
-            "method": "tools/call",
-            "params": {"name": tool_name, "arguments": arguments or {}},
+            "method": method,
+            "params": params or {},
         }
     ).encode("utf-8")
 
@@ -162,6 +200,63 @@ def mcp_call(
         return {"ok": False, "error": "parse_error", "raw": raw[:500]}
 
     return normalize_result(payload)
+
+
+def mcp_call(
+    tool_name: str,
+    arguments: Optional[Dict[str, Any]] = None,
+    env: Optional[Dict[str, str]] = None,
+    timeout: float = TIMEOUT_S,
+) -> Dict[str, Any]:
+    return mcp_rpc(
+        "tools/call",
+        {"name": tool_name, "arguments": arguments or {}},
+        env=env,
+        timeout=timeout,
+    )
+
+
+def tools_with_session_id(env=None) -> frozenset:
+    """Discover write tools that accept session_id; empty on older servers."""
+    global _session_id_tools
+    if _session_id_tools is not None:
+        return _session_id_tools
+    listed = mcp_rpc("tools/list", {}, env=env, timeout=6.0)
+    names: set = set()
+    if listed.get("ok"):
+        data = listed.get("data")
+        tools = []
+        if isinstance(data, dict):
+            tools = data.get("tools") or []
+        elif isinstance(data, list):
+            tools = data
+        for tool in tools:
+            if not isinstance(tool, dict):
+                continue
+            schema = tool.get("inputSchema") or tool.get("input_schema") or {}
+            props = schema.get("properties") if isinstance(schema, dict) else {}
+            if isinstance(props, dict) and "session_id" in props and tool.get("name"):
+                names.add(str(tool["name"]))
+    _session_id_tools = frozenset(names)
+    return _session_id_tools
+
+
+def with_origin_session(tool_name: str, arguments: Optional[Dict[str, Any]], origin: Any, env=None) -> Dict[str, Any]:
+    """Attach originating session_id only when the tool schema supports it."""
+    args = dict(arguments or {})
+    if tool_name not in EVENT_WRITE_TOOLS:
+        return args
+    if tool_name not in tools_with_session_id(env=env):
+        args.pop("session_id", None)
+        return args
+    supplied = args.get("session_id")
+    if valid_origin_label(supplied):
+        return args
+    if valid_origin_label(origin):
+        args["session_id"] = origin
+    else:
+        args.pop("session_id", None)
+    return args
 
 
 def upsert_project(name: str, env=None) -> Dict[str, Any]:
@@ -230,13 +325,13 @@ def poll_subscriptions(subscriber: str, limit: int = POLL_LIMIT, project_id: Any
     return mcp_call("poll_subscriptions", args, env=env, timeout=timeout)
 
 
-def subscription_events(poll_result: Any, own_record_ids=()) -> list:
-    """Flatten a poll result to (project_name, event) pairs, dropping this session's own writes."""
+def subscription_events(poll_result: Any, own_session_id=None) -> list:
+    """Flatten poll results, dropping only actor=self with this session's origin label."""
     payload = poll_result.get("data") if isinstance(poll_result, dict) and poll_result.get("ok") else None
     results = payload.get("results") if isinstance(payload, dict) else None
     if not isinstance(results, list):
         return []
-    own = {int(v) for v in own_record_ids if type(v) is int}
+    own = own_session_id if valid_origin_label(own_session_id) else None
     out = []
     for item in results:
         if not isinstance(item, dict):
@@ -246,16 +341,16 @@ def subscription_events(poll_result: Any, own_record_ids=()) -> list:
         for ev in item.get("events") or []:
             if not isinstance(ev, dict):
                 continue
-            rid = ev.get("record_id")
-            if type(rid) is int and rid in own and ev.get("actor") == "self":
+            ev_sid = ev.get("session_id")
+            if own and ev.get("actor") == "self" and valid_origin_label(ev_sid) and ev_sid == own:
                 continue
             out.append((name, ev, bool(item.get("has_more"))))
     return out
 
 
-def format_updates(poll_result: Any, own_record_ids=(), max_len: int = 2500) -> Optional[str]:
+def format_updates(poll_result: Any, own_session_id=None, max_len: int = 2500) -> Optional[str]:
     """Render new subscribed-project changes for turn-start injection; None when quiet."""
-    pairs = subscription_events(poll_result, own_record_ids)
+    pairs = subscription_events(poll_result, own_session_id)
     if not pairs:
         return None
     lines = [

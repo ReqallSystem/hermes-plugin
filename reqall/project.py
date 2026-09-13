@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import socket
+import stat
 import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -53,7 +55,7 @@ GENERIC_DIR_NAMES = frozenset(
 
 _PROJECT_KV = re.compile(
     r"(?<![\w/-])project(?:_name)?\s*[:=]\s*"
-    r"(?:`([^`\r\n]+)`|'([^'\r\n]+)'|\"([^\"\r\n]+)\"|([^\s`'\",;]+))",
+    r"(?:`([^`\r\n]*)`|'([^'\r\n]*)'|\"([^\"\r\n]*)\"|([^\s`'\",;]+))",
     re.I,
 )
 
@@ -97,11 +99,16 @@ def is_generic_cwd(cwd: Path) -> bool:
 
 def extract_project_hint(text: str) -> Optional[str]:
     """Accept only explicitly labelled selections, never incidental slash tokens."""
-    if not text:
+    if not text or re.match(r"^\s*\[ASYNC (?:DELEGATION (?:BATCH COMPLETE|COMPLETE|TASK FAILED)\b|SUBAGENT REPORT\])", text):
+        # Hermes delivers these notifications as user_message without a trusted
+        # synthetic flag. Their quoted task/results are not a user selection.
         return None
     kv = _PROJECT_KV.search(text)
     if kv:
-        return next(value for value in kv.groups() if value is not None).strip() or None
+        value = next(value for value in kv.groups() if value is not None)
+        if kv.group(4) is not None:
+            value = value.rstrip(".,:;!?)]")
+        return value.strip() or None
     return None
 
 
@@ -128,13 +135,15 @@ def machine_project_name(env: Optional[Mapping[str, str]] = None) -> str:
             user = "unknown"
     except (AttributeError, KeyError, OSError):
         user = "unknown"
-    return f".machine/{clean(host).lower()}/{clean(user)}"
+    host = clean(host).lower()
+    return f".machine/{host}/{clean(user)}"
 
 
 def bind_project(
     cwd: Optional[str] = None,
     prompt: Optional[str] = None,
     env: Optional[Mapping[str, str]] = None,
+    selected: Optional[str] = None,
 ) -> ProjectBinding:
     """Resolve a Reqall project without creating junk names from $HOME."""
     override = project_name_override(env)
@@ -148,9 +157,13 @@ def bind_project(
         if normalized:
             return ProjectBinding(normalized, "git", True)
 
-    hint = extract_project_hint(prompt or "")
+    hint = extract_project_hint(prompt or "") or (selected or "").strip()
     if hint:
         return ProjectBinding(hint, "prompt", True)
+
+    local = _local_portable_name(root, env)
+    if local:
+        return local
 
     return ProjectBinding(machine_project_name(env), "machine", True)
 
@@ -208,16 +221,217 @@ def _git_origin(cwd: Path) -> str:
 
 
 def _normalize_remote(remote_url: str) -> str:
-    if not remote_url:
+    value = remote_url.strip().rstrip("/")
+    if not value or re.match(r"^(?:[A-Za-z]:|[\\/]|\.|~)", value) or "\\" in value:
         return ""
-    trimmed = re.sub(r"\.git$", "", remote_url.strip())
-    m = re.search(r"[:/]([^/:]+/[^/]+)$", trimmed)
-    if m:
-        return m.group(1)
+    if re.match(r"^(?:https?|ssh|git)://", value, re.I):
+        try:
+            parsed = urlparse(value)
+            if not parsed.hostname:
+                return ""
+            path = parsed.path
+        except ValueError:
+            return ""
+    else:
+        if "://" in value or value.lower().startswith("file:"):
+            return ""
+        match = re.fullmatch(r"(?:[^\s/@:]+@)?[^\s/:]+:(.+)", value)
+        if not match:
+            return ""
+        path = match.group(1)
+    parts = re.sub(r"\.git$", "", path.strip("/")).split("/")
+    if len(parts) < 2 or any(part in {"", ".", ".."} for part in parts):
+        return ""
+    return "/".join(parts[-2:])
+
+
+_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$")
+_YML_KEY = re.compile(r"^(project|name)\s*:\s*(.*)$")
+
+
+def _yaml_scalar(value: str) -> Optional[str]:
+    value = value.strip()
+    if value.startswith(('"', "'")):
+        match = re.fullmatch(r'''(["'])([^"'\\]*)\1\s*(?:#.*)?''', value)
+        return match.group(2) if match else None
+    value = re.split(r"\s+#", value, maxsplit=1)[0].strip()
+    if value.lower() in {"", "null", "~", "true", "false", "yes", "no", "on", "off"}:
+        return None
+    if re.fullmatch(r"[+-]?(?:(?:[0-9][0-9_]*(?:\.[0-9_]*)?|\.[0-9_]+)(?:e[+-]?[0-9]+)?|0x[0-9a-f_]+|0o[0-7_]+|0b[01_]+|\.inf|\.nan)", value, re.I):
+        return None
+    return value
+
+
+def _yaml_name(text: str) -> str:
+    values: Dict[str, Optional[str]] = {}
+    for line in text.splitlines():
+        # Never truncate multiline scalars or nested YAML into an identity.
+        if re.match(r"\s+\S", line) and not line.lstrip().startswith("#"):
+            return ""
+        match = _YML_KEY.fullmatch(line)
+        if not match:
+            continue
+        key = match.group(1).lower()
+        value = _safe_name(_yaml_scalar(match.group(2)))
+        if key in values and values[key] != value:
+            return ""
+        values[key] = value
+    return _safe_name(values.get("project")) or _safe_name(values.get("name"))
+
+
+def _ancestors(start: Path, boundary: Optional[Path] = None):
+    cur = start
+    seen: set[Path] = set()
+    while cur not in seen:
+        seen.add(cur)
+        yield cur
+        if cur == boundary or cur.parent == cur:
+            break
+        cur = cur.parent
+
+
+def _safe_name(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    name = value.strip()
+    if not _NAME_RE.fullmatch(name) or any(part in {"", ".", ".."} for part in name.split("/")):
+        return ""
+    return name
+
+
+def _read_metadata(path: Path, boundary: Optional[Path] = None) -> str:
+    """Read at most 64 KiB of a regular UTF-8 file, otherwise ignore it."""
     try:
-        path = urlparse(trimmed).path.lstrip("/")
-        if path:
-            return path
-    except Exception:
-        pass
-    return ""
+        if boundary is not None and not path.resolve().is_relative_to(boundary):
+            return ""
+        if not path.is_file():
+            return ""
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0))
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_size > 65536:
+                return ""
+            data = b""
+            while len(data) <= 65536:
+                chunk = os.read(fd, 65537 - len(data))
+                if not chunk:
+                    break
+                data += chunk
+        finally:
+            os.close(fd)
+        return data.decode("utf-8") if len(data) <= 65536 else ""
+    except (OSError, UnicodeError, ValueError, RuntimeError):
+        return ""
+
+
+def _reqall_yml_name(root: Path, boundary: Optional[Path] = None) -> Optional[str]:
+    for directory in _ancestors(root, boundary):
+        for filename in (".reqall.yml", ".reqall.yaml"):
+            path = directory / filename
+            if not path.is_file():
+                continue
+            try:
+                text = _read_metadata(path, boundary)
+            except OSError:
+                continue
+            name = _yaml_name(text)
+            if name:
+                return name
+    return None
+
+
+def _package_name(root: Path, boundary: Optional[Path] = None) -> Optional[str]:
+    for directory in _ancestors(root, boundary):
+        pkg = directory / "package.json"
+        if pkg.is_file():
+            try:
+                data = json.loads(_read_metadata(pkg, boundary))
+            except (OSError, json.JSONDecodeError, TypeError):
+                data = None
+            if isinstance(data, dict):
+                raw = data.get("name")
+                if isinstance(raw, str) and re.fullmatch(r"@[A-Za-z0-9._-]+/[A-Za-z0-9._-]+", raw.strip()):
+                    raw = raw.strip()[1:]
+                name = _safe_name(raw)
+                if name:
+                    return name
+        text = re.sub(r"/\*.*?\*/", " ", _read_metadata(directory / "go.mod", boundary), flags=re.S)
+        declarations = [line for line in text.splitlines() if re.match(r"\s*module\b", line)]
+        if len(declarations) == 1:
+            match = re.fullmatch(r'\s*module\s+(?:"([^"\\]+)"|`([^`]+)`|([^\s"`]+))\s*(?://.*)?', declarations[0])
+            if match:
+                name = _safe_name(next(value for value in match.groups() if value is not None))
+                if name:
+                    return name
+        in_package = False
+        name = ""
+        seen = False
+        cargo = _read_metadata(directory / "Cargo.toml", boundary)
+        # Reject unsupported multiline TOML rather than scanning string contents.
+        if re.search(r"\"{3}|'{3}", cargo):
+            continue
+        for line in cargo.splitlines():
+            line = line.strip()
+            if line.startswith("["):
+                in_package = bool(re.fullmatch(r"\[package\]\s*(?:#.*)?", line))
+            elif in_package:
+                match = re.fullmatch(r"name\s*=\s*(.*)", line)
+                if match:
+                    raw = match.group(1)
+                    value = _safe_name(_yaml_scalar(raw)) if raw.startswith(('"', "'")) else ""
+                    if seen and value != name:
+                        name = ""
+                        break
+                    name, seen = value, True
+        if name:
+            return name
+    return None
+
+
+def _workspace_root(start: Path, env: Optional[Mapping[str, str]]) -> Optional[Path]:
+    override = (env if env is not None else os.environ).get("REQALL_WORKSPACE_ROOT", "").strip()
+    if override:
+        try:
+            candidate = Path(override).expanduser()
+            base = (candidate if candidate.is_absolute() else start / candidate).resolve()
+            return base if base.is_dir() and start.resolve().is_relative_to(base) else None
+        except (OSError, ValueError, RuntimeError):
+            return None
+    for directory in _ancestors(start):
+        if (directory / ".reqall-workspace").is_file():
+            return directory
+    return None
+
+
+def _workspace_relative(root: Path, env: Optional[Mapping[str, str]]) -> Optional[str]:
+    base = _workspace_root(root, env)
+    if not base:
+        return None
+    try:
+        rel = root.resolve().relative_to(base)
+    except (OSError, ValueError):
+        return None
+    parts = [p for p in rel.parts if p not in {".", ""}]
+    if not parts:
+        return None
+    return _safe_name("/".join(parts))
+
+
+def _local_portable_name(root: Path, env: Optional[Mapping[str, str]]) -> Optional[ProjectBinding]:
+    try:
+        root = root.resolve(strict=True)
+        if not root.is_dir():
+            return None
+    except (OSError, ValueError, RuntimeError):
+        return None
+    boundary = _workspace_root(root, env)
+    yml = _reqall_yml_name(root, boundary)
+    if yml:
+        return ProjectBinding(yml, "reqall_yml", True)
+    pkg = _package_name(root, boundary)
+    if pkg:
+        return ProjectBinding(pkg, "package", True)
+    rel = _workspace_relative(root, env)
+    if rel:
+        return ProjectBinding(rel, "workspace_relative", True)
+    return None

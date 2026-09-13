@@ -56,6 +56,20 @@ class RegistrationTests(unittest.TestCase):
         load.assert_called_once_with('actual')
         self.assertEqual(result['session']['session_id'], 'actual')
 
+    def test_status_project_identity_is_authoritative_session_binding(self):
+        self.pkg.state.save('bound', dict(self.pkg.state.load('bound'),
+                                         project_name='.user', project_source='prompt',
+                                         project_safe_to_upsert=True, project_id=42))
+        with mock.patch.object(self.pkg, 'probe_mcp_host', return_value={}), \
+             mock.patch.object(self.pkg, 'missing_enabled_homes', return_value=[]), \
+             mock.patch.object(self.pkg, 'api_key', return_value=''), \
+             mock.patch.object(self.pkg, 'bind_project', return_value=type('Binding', (), {
+                 'name': 'different/discovery', 'as_dict': lambda self: {'name': 'different/discovery'}})()) as discover:
+            result = json.loads(self.pkg._handle_status({'session_id': 'bound'}))
+        self.assertEqual(result['project_name'], '.user')
+        self.assertEqual(result['project_binding']['source'], 'prompt')
+        discover.assert_not_called()
+
     def test_clear_dirty_cannot_bypass_verified_acknowledgement(self):
         with mock.patch.object(self.pkg.state, 'clear_dirty') as clear:
             result = self.pkg._slash_reqall('clear-dirty')

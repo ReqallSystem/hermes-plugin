@@ -54,13 +54,8 @@ intent with real links, and its kind/status are checked again at readback.
    exact returned `session_id` and `work_revision` for this persistence batch,
    plus work evidence and selected intents. The revision identifies the work being
    documented; do not replace it with a later revision just to pass acknowledgement.
-2. **Use the selected project.** Take the safe project binding from status/context.
-   Resolution is explicit override (`REQALL_PROJECT_NAME` or scoped plugin setting)
-   → git origin → explicit labelled `project_name` / `project` selection → reserved
-   `.machine/<hostname>/<os-user>`. `REQALL_MACHINE_NAME` overrides hostname.
-   Never use a cwd basename or a slash token such as `src/auth.py` from prose.
-   `reqall action=upsert_project` with the exact name returns `project_id`.
-   Do not migrate historical records or touch another profile.
+2. **Use the selected project.** Use the authoritative binding from the snapshot,
+   following Project routing below. Do not re-derive a name during persistence.
 3. **Reconcile actual outcomes.** Account for every meaningful item in the snapshot:
    changed files, executed commands, findings, decisions, tests, subagent results,
    and follow-ups. Distinguish completed work from plans and failed attempts.
@@ -114,6 +109,37 @@ intent with real links, and its kind/status are checked again at readback.
    clear dirty state manually or use a later revision with an old record batch.
 8. **Report briefly.** Give verified record IDs, useful links, and any remaining
    persistence failures. Do not claim all work persisted when only a subset did.
+
+## Project routing
+
+Read `reqall_session action=status`: its bound session identity is authoritative
+for recall, work, persistence, and verification. Do not recompute a different name
+between steps. Preserve deliberate operation targets (including SLEEP) and `.user`.
+Automatic precedence: trimmed `REQALL_PROJECT_NAME` / scoped `settings.project_name`
+→ network git origin → explicit labelled `project_name` / `project` prompt or retained
+session selection → nearest valid `.reqall.yml` / `.reqall.yaml` → nearest valid
+package (`package.json` > `go.mod` > `Cargo.toml` per directory) → exact path relative
+to `REQALL_WORKSPACE_ROOT` or nearest `.reqall-workspace` marker → reserved
+`.machine/<short-lower-host>/<os-user>`. `REQALL_MACHINE_NAME` / scoped
+`settings.machine_name` overrides the whole host (dots retained); use actual OS user.
+Never use an unconstrained cwd basename, incidental prose path, or synthetic report
+example. Git accepts HTTP(S)/SSH/git URLs or SCP, not local/file origins; retain
+final two path segments, trimming trailing slashes and `.git`, without migrations.
+Use only regular UTF-8 metadata files of at most 64 KiB. YAML supports simple
+top-level `project` / `name` strings (project preferred, .yml before .yaml), matching
+quotes and comments; reject null/boolean/numeric values, malformed quoting and
+contradictory duplicates. JSON `name` must be a string; only valid npm `@scope/name`
+removes one `@`. Go preserves the complete module path after comments; Cargo reads
+only a simple quoted `[package]` name, never bin/dependency names. Validate ASCII
+alphanumeric `._-` slash segments before normalization; reject absolute/drive/UNC,
+backslash/tilde and empty/dot/dotdot segments. Metadata named `src` is valid.
+Scan nearest valid ancestors, stopping at a containing workspace root inclusively.
+Workspace settings default to process environment; relative roots resolve from cwd,
+`~/` from home. Resolve real paths before containment; reject symlink escapes and
+invalid/nonancestor configured roots without marker fallback. Root equality gives
+no relative identity. Keep every relative segment. Explicit names are preserved,
+not subjected to new metadata validation. Never migrate records or touch profiles.
+Use `upsert_project` with the exact binding only when needed to obtain `project_id`.
 
 ## Pitfalls
 

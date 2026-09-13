@@ -14,12 +14,34 @@ Do not turn a general question into unsolicited record mutations.
 
 Prefer plugin `reqall` (`action` + `arguments`); host tools are `mcp__reqall__*`
 / `mcp__Reqall__*`. `reqall_skill` loads this skill when `skill_view` is off.
-Read `reqall_session action=status` for the session and safe project binding.
-Resolution: explicit override (`REQALL_PROJECT_NAME` or scoped plugin setting)
-→ git origin → explicit labelled `project_name` / `project` selection → reserved
-`.machine/<hostname>/<os-user>`. `REQALL_MACHINE_NAME` overrides hostname.
-Never use a cwd basename or a slash token from prose. Use the exact binding for
-`upsert_project` to get `project_id`; never migrate records or touch another profile.
+Read `reqall_session action=status`: its bound session identity is authoritative
+for recall, work, persistence, and verification. Do not recompute a different name
+between steps. Preserve deliberate operation targets (including SLEEP) and `.user`.
+Automatic precedence: trimmed `REQALL_PROJECT_NAME` / scoped `settings.project_name`
+→ network git origin → explicit labelled `project_name` / `project` prompt or retained
+session selection → nearest valid `.reqall.yml` / `.reqall.yaml` → nearest valid
+package (`package.json` > `go.mod` > `Cargo.toml` per directory) → exact path relative
+to `REQALL_WORKSPACE_ROOT` or nearest `.reqall-workspace` marker → reserved
+`.machine/<short-lower-host>/<os-user>`. `REQALL_MACHINE_NAME` / scoped
+`settings.machine_name` overrides the whole host (dots retained); use actual OS user.
+Never use an unconstrained cwd basename, incidental prose path, or synthetic report
+example. Git accepts HTTP(S)/SSH/git URLs or SCP, not local/file origins; retain
+final two path segments, trimming trailing slashes and `.git`, without migrations.
+Use only regular UTF-8 metadata files of at most 64 KiB. YAML supports simple
+top-level `project` / `name` strings (project preferred, .yml before .yaml), matching
+quotes and comments; reject null/boolean/numeric values, malformed quoting and
+contradictory duplicates. JSON `name` must be a string; only valid npm `@scope/name`
+removes one `@`. Go preserves the complete module path after comments; Cargo reads
+only a simple quoted `[package]` name, never bin/dependency names. Validate ASCII
+alphanumeric `._-` slash segments before normalization; reject absolute/drive/UNC,
+backslash/tilde and empty/dot/dotdot segments. Metadata named `src` is valid.
+Scan nearest valid ancestors, stopping at a containing workspace root inclusively.
+Workspace settings default to process environment; relative roots resolve from cwd,
+`~/` from home. Resolve real paths before containment; reject symlink escapes and
+invalid/nonancestor configured roots without marker fallback. Root equality gives
+no relative identity. Keep every relative segment. Explicit names are preserved,
+not subjected to new metadata validation. Never migrate records or touch profiles.
+Use `upsert_project` with the exact binding only when needed to obtain `project_id`.
 
 ## Procedure
 

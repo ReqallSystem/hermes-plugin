@@ -13,8 +13,12 @@ def _poll(events, project='org/repo', has_more=False):
          'events': events, 'has_more': has_more}]}}
 
 
-def _ev(action, rid, actor='other', title='T', kind='todo'):
-    return {'id': 1, 'project_id': 7, 'action': action, 'record_id': rid, 'kind': kind, 'title': title, 'actor': actor, 'created_at': 'now'}
+def _ev(action, rid, actor='other', title='T', kind='todo', session_id=None):
+    ev = {'id': 1, 'project_id': 7, 'action': action, 'record_id': rid, 'kind': kind, 'title': title, 'actor': actor, 'created_at': 'now'}
+    if session_id is not None:
+        ev['session_id'] = session_id
+    return ev
+
 
 
 class SubscriptionTests(unittest.TestCase):
@@ -54,20 +58,29 @@ class SubscriptionTests(unittest.TestCase):
         return [t for t, _ in self.calls if t == name]
 
     def test_format_updates_hides_own_writes_and_renders_others(self):
-        poll = _poll([_ev('record.created', 1, actor='self', title='Mine'),
-                      _ev('record.updated', 2, actor='self', title='Other session of mine'),
+        mine = client.origin_label('s')
+        other = client.origin_label('other')
+        poll = _poll([_ev('record.created', 1, actor='self', title='Mine', session_id=mine),
+                      _ev('record.updated', 2, actor='self', title='Other session of mine', session_id=other),
+                      _ev('record.updated', 1, actor='self', title='Later edit same record', session_id=other),
+                      _ev('record.created', 9, actor='self', title='Legacy unattributed'),
                       _ev('record.deleted', 3, title='Teammate delete', kind='spec'),
                       _ev('sleep.applied', None, actor='unknown', title='SLEEP applied 2 operation(s)', kind=None)], has_more=True)
-        text = client.format_updates(poll, own_record_ids=[1])
+        text = client.format_updates(poll, mine)
         self.assertIn('## Reqall updates since last turn', text)
-        self.assertNotIn('Mine', text, 'this session wrote record 1')
+        self.assertNotIn('Mine', text, 'exact own origin label is echo')
         self.assertIn('record.updated #2 [todo] (you, another session): Other session of mine', text)
+        self.assertIn('Later edit same record', text)
+        self.assertIn('Legacy unattributed', text)
         self.assertIn('org/repo: record.deleted #3 [spec]: Teammate delete', text)
         self.assertIn('sleep.applied: SLEEP applied 2 operation(s)', text)
         self.assertIn('more pending', text)
-        self.assertIsNone(client.format_updates(_poll([_ev('record.created', 1, actor='self')]), own_record_ids=[1]))
+        self.assertIsNone(client.format_updates(_poll([_ev('record.created', 1, actor='self', session_id=mine)]), mine))
         self.assertIsNone(client.format_updates({'ok': False, 'error': 'network'}))
         self.assertIsNone(client.format_updates({'ok': True, 'data': {'results': 'garbage'}}))
+        self.assertTrue(client.valid_origin_label(mine))
+        self.assertTrue(mine.startswith('hermes:'))
+        self.assertNotEqual(mine, 's', 'subscriber must not be the origin label')
 
     def test_turn_subscribes_once_then_polls_each_turn(self):
         with patch.object(client, 'mcp_call', side_effect=self._router()):
@@ -85,7 +98,8 @@ class SubscriptionTests(unittest.TestCase):
         self.calls.clear()
         hooks.post_tool_call('reqall', args={'action': 'upsert_record'}, session_id='s',
                              result={'ok': True, 'data': {'record': {'id': 5, 'kind': 'work', 'project_id': 7}}})
-        poll = _poll([_ev('record.created', 5, actor='self', title='My own write'),
+        poll = _poll([_ev('record.created', 5, actor='self', title='My own write',
+                          session_id=client.origin_label('s')),
                       _ev('record.updated', 6, title='Teammate change')])
         with patch.object(client, 'mcp_call', side_effect=self._router(poll=poll)):
             second = hooks.pre_llm_call(user_message='thanks, continue', session_id='s')
@@ -201,6 +215,42 @@ class SubscriptionTests(unittest.TestCase):
             ('list_subscriptions', {}),
             ('poll_subscriptions', {}),
         ])
+
+    def test_write_actions_attach_origin_when_schema_allows(self):
+        import importlib.util, sys
+        from pathlib import Path
+        root = Path(__file__).resolve().parent.parent
+        spec = importlib.util.spec_from_file_location('hermes_reqall_origin_test', root / '__init__.py', submodule_search_locations=[str(root)])
+        mod = importlib.util.module_from_spec(spec)
+        mod.__package__ = 'hermes_reqall_origin_test'
+        mod.__path__ = [str(root)]
+        sys.modules['hermes_reqall_origin_test'] = mod
+        spec.loader.exec_module(mod)
+        client.set_session_id_tools({'upsert_record', 'sleep_apply'})
+        self.addCleanup(client.reset_session_id_schema_cache)
+        with patch.object(mod.client, 'mcp_call', return_value={'ok': True, 'data': {}}) as call, \
+             patch.object(mod.client, 'with_origin_session', wraps=client.with_origin_session):
+            # Pin schema on the loaded client too.
+            mod.client.set_session_id_tools({'upsert_record', 'sleep_apply'})
+            mod._handle_reqall_action({'action': 'upsert_record', 'arguments': {'title': 'T'}}, session_id='s')
+            mod._handle_reqall_action({'action': 'search', 'arguments': {'query': 'q'}}, session_id='s')
+            mod._handle_reqall_action({'action': 'upsert_record', 'arguments': {'title': 'U', 'session_id': 'claude:abc'}}, session_id='s')
+            mod._handle_reqall_action({'action': 'delete_link', 'arguments': {'id': 1}}, session_id='s')
+            mod._handle_reqall_action({'action': 'sleep_apply', 'arguments': {'ops': []}}, session_id='s')
+        origin = client.origin_label('s')
+        self.assertEqual([c.args for c in call.call_args_list], [
+            ('upsert_record', {'title': 'T', 'session_id': origin}),
+            ('search', {'query': 'q'}),
+            ('upsert_record', {'title': 'U', 'session_id': 'claude:abc'}),
+            ('delete_link', {'id': 1}),
+            ('sleep_apply', {'ops': [], 'session_id': origin}),
+        ])
+        self.assertEqual(state.load('s')['origin_session_id'], origin)
+        client.set_session_id_tools(set())
+        mod.client.set_session_id_tools(set())
+        with patch.object(mod.client, 'mcp_call', return_value={'ok': True, 'data': {}}) as call:
+            mod._handle_reqall_action({'action': 'upsert_record', 'arguments': {'title': 'legacy'}}, session_id='s')
+        self.assertEqual(call.call_args.args, ('upsert_record', {'title': 'legacy'}))
 
 
 if __name__ == '__main__':

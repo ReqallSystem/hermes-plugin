@@ -21,7 +21,7 @@ from .reqall.hooks import (
 )
 from .reqall.install import ensure_installs
 from .reqall.mcp_status import probe_mcp_host
-from .reqall.project import bind_project
+from .reqall.project import ProjectBinding, bind_project
 
 logger = logging.getLogger(__name__)
 PLUGIN_ROOT = Path(__file__).resolve().parent
@@ -332,12 +332,16 @@ def _handle_session(args: dict, **kwargs) -> str:
 def _handle_status(args: dict, **kwargs) -> str:
     sid = kwargs.get("session_id") or kwargs.get("task_id") or args.get("session_id")
     cwd = args.get("cwd")
-    binding = bind_project(cwd=cwd if isinstance(cwd, str) else None)
+    session = state.load(str(sid)) if sid else None
+    if session and session.get("project_name"):
+        binding = ProjectBinding(session["project_name"], session.get("project_source", "session"),
+                                 bool(session.get("project_safe_to_upsert")))
+    else:
+        binding = bind_project(cwd=cwd if isinstance(cwd, str) else None)
     project = binding.name or ""
     key = api_key()
     mcp = probe_mcp_host()
     warnings: List[str] = []
-    session = state.load(str(sid)) if sid else None
     payload: Dict[str, Any] = {
         "ok": True,
         "plugin_root": str(PLUGIN_ROOT),
@@ -420,6 +424,13 @@ def _handle_reqall_action(args: dict, **kwargs) -> str:
         return json.dumps({"ok": False, "error": "arguments_must_be_object"})
     if action in SESSION_SCOPED_ACTIONS and sid and not arguments.get("subscriber"):
         arguments = {**arguments, "subscriber": str(sid)}
+    origin = None
+    if sid:
+        def remember(st):
+            if not client.valid_origin_label(st.get("origin_session_id")):
+                st["origin_session_id"] = client.origin_label(str(sid))
+        origin = state.update(str(sid), remember).get("origin_session_id")
+    arguments = client.with_origin_session(action, arguments, origin)
     result = client.mcp_call(action, arguments)
     return json.dumps(result, indent=2, default=str)
 
