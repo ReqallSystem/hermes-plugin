@@ -93,6 +93,18 @@ class RegistrationTests(unittest.TestCase):
         self.assertIn('# Capture Intent', body)
         self.assertIn('select_intent', body)
 
+    def test_sleep_registration_and_fallbacks_load_work_review_policy(self):
+        ctx = Context()
+        self.pkg.register(ctx)
+        body = ctx.skills['reqall-sleep'].read_text()
+        self.assertIn('## WORK review policy', body)
+        self.assertIn('Alignment is not redundancy', body)
+        self.assertIn('no unique durable information', body)
+        result = json.loads(self.pkg._handle_reqall_skill({'name': 'sleep'}))
+        self.assertTrue(result['ok'])
+        self.assertEqual(result['body'], body)
+        self.assertIn(body, self.pkg._slash_reqall('sleep'))
+
     def test_registration_loads_scoped_machine_and_api_settings(self):
         ctx = Context()
         ctx.get_config = lambda name: {'machine_name': 'stable-box', 'api_url': 'https://example.invalid'}.get(name)

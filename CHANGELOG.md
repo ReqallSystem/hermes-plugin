@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026.9.17
+
+- Align SLEEP WORK review with existing intent and knowledge. Preserve new evidence
+  even when work follows its spec; discard only redundant information, retaining
+  useful relationships. Keep unresolved deviations as linked issues, not automatic
+  specification changes; leave ambiguous cases untouched.
+- Verify the registered SLEEP skill and tool/slash fallbacks load the same policy.
+
 ## 2026.9.13
 
 - **Feat:** Originating session attribution on native `reqall` writes. Event-producing
