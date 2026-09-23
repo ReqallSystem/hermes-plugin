@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026.9.23
+
+- Sanitize Unicode session IDs into valid ASCII origin labels so native writes
+  retain attribution; preserve existing ASCII labels and the length limit.
+- Retry origin-capability discovery on the next write after a failed schema
+  request instead of caching the failure. Successful legacy-server results remain
+  cached; writes themselves are not retried.
+- Add regression coverage for label sanitization, schema-discovery recovery, and
+  unsupported-schema caching. All 209 offline tests pass.
+
 ## 2026.9.17
 
 - Align SLEEP WORK review with existing intent and knowledge. Preserve new evidence

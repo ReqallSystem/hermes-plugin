@@ -37,7 +37,7 @@ def valid_origin_label(value: Any) -> bool:
 
 def origin_label(session_id: str) -> str:
     """Stable plugin-prefixed label; never a secret, never the subscriber field."""
-    body = "".join(c if c.isalnum() or c in "._:-" else "_" for c in str(session_id or "session"))
+    body = re.sub(r"[^A-Za-z0-9._:-]", "_", str(session_id or "session"))
     body = body.strip("._:-") or "session"
     if not body[0].isalnum():
         body = "s" + body
@@ -222,6 +222,9 @@ def tools_with_session_id(env=None) -> frozenset:
     if _session_id_tools is not None:
         return _session_id_tools
     listed = mcp_rpc("tools/list", {}, env=env, timeout=6.0)
+    if not listed.get("ok"):
+        # Fail open for this write, but retry discovery on the next one.
+        return frozenset()
     names: set = set()
     if listed.get("ok"):
         data = listed.get("data")

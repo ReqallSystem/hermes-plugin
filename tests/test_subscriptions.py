@@ -216,6 +216,39 @@ class SubscriptionTests(unittest.TestCase):
             ('poll_subscriptions', {}),
         ])
 
+    def test_unicode_origin_labels_remain_valid_and_attached(self):
+        client.set_session_id_tools({'upsert_record'})
+        self.addCleanup(client.reset_session_id_schema_cache)
+        for sid in ('séance-123', '会話', '１２３', '🙂', '', 's' * 200, 'host-session_1.2:3'):
+            with self.subTest(sid=sid):
+                origin = client.origin_label(sid)
+                self.assertTrue(client.valid_origin_label(origin), origin)
+                self.assertEqual(client.origin_label(sid), origin)
+                self.assertEqual(client.with_origin_session('upsert_record', {}, origin),
+                                 {'session_id': origin})
+        self.assertEqual(client.origin_label('host-session_1.2:3'), 'hermes:host-session_1.2:3')
+
+    def test_origin_schema_failure_retries_on_next_write(self):
+        client.reset_session_id_schema_cache()
+        self.addCleanup(client.reset_session_id_schema_cache)
+        supported = {'ok': True, 'data': {'tools': [
+            {'name': 'upsert_record', 'inputSchema': {'properties': {'session_id': {}}}}]}}
+        with patch.object(client, 'mcp_rpc', side_effect=[{'ok': False, 'error': 'network'}, supported]) as rpc:
+            self.assertEqual(client.with_origin_session('upsert_record', {}, 'hermes:s'), {})
+            self.assertEqual(client.with_origin_session('upsert_record', {}, 'hermes:s'),
+                             {'session_id': 'hermes:s'})
+            self.assertEqual(client.with_origin_session('upsert_record', {}, 'hermes:s'),
+                             {'session_id': 'hermes:s'})
+        self.assertEqual(rpc.call_count, 2)
+
+    def test_origin_schema_success_without_support_is_cached(self):
+        client.reset_session_id_schema_cache()
+        self.addCleanup(client.reset_session_id_schema_cache)
+        with patch.object(client, 'mcp_rpc', return_value={'ok': True, 'data': {'tools': []}}) as rpc:
+            for _ in range(2):
+                self.assertEqual(client.with_origin_session('upsert_record', {}, 'hermes:s'), {})
+        self.assertEqual(rpc.call_count, 1)
+
     def test_write_actions_attach_origin_when_schema_allows(self):
         import importlib.util, sys
         from pathlib import Path
