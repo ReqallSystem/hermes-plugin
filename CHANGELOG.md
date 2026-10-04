@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026.10.4
+
+- Validate a Git origin's final org/repo against the shared automatic-name grammar
+  without trimming: URL escapes, Unicode, spaces (including at the edges), and
+  shell characters fall through to portable metadata instead of binding an
+  unintended project.
+- Read an unquoted `go.mod` module path up to an adjacent `//` comment, matching
+  Go's modfile lexer.
+- Add regression coverage for both. All 209 offline tests pass; the cross-repo
+  PROJECT_NAMING checker passes 900/900.
+
 ## 2026.9.23
 
 - Sanitize Unicode session IDs into valid ASCII origin labels so native writes
