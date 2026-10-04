@@ -87,6 +87,8 @@ class PortableProjectTests(unittest.TestCase):
                     path.unlink()
         (leaf / 'go.mod').write_text('module `example.com/acme/repo/v2`')
         self.assertEqual(self.bind(leaf).name, 'example.com/acme/repo/v2')
+        (leaf / 'go.mod').write_text('module example.com/acme/repo//adjacent comment\n')
+        self.assertEqual(self.bind(leaf).name, 'example.com/acme/repo')
 
     def test_yaml_continuations_do_not_truncate_identity(self):
         (self.root / 'package.json').write_text('{"name":"fallback"}')
@@ -213,6 +215,7 @@ class PortableProjectTests(unittest.TestCase):
             'https://host/repo.git': '', 'host:org/../repo.git': '',
             'https://host/org/r%C3%A9po.git': '', 'git@host:org/my repo.git': '',
             'https://host/org/rép.git': '', 'ssh://git@host/org/re$po.git': '',
+            'git@host: org/repo.git': '', 'git@host:org/repo .git': '',
             'git@host:org/valid_repo.v2.git': 'org/valid_repo.v2',
         }
         for value, expected in cases.items():
