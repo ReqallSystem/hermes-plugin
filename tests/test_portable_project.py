@@ -211,6 +211,9 @@ class PortableProjectTests(unittest.TestCase):
             '../Org/Repo.git': '', 'Org/Repo.git': '', '~/Org/Repo.git': '',
             'ftp://host/org/repo.git': '', 'https:///org/repo.git': '',
             'https://host/repo.git': '', 'host:org/../repo.git': '',
+            'https://host/org/r%C3%A9po.git': '', 'git@host:org/my repo.git': '',
+            'https://host/org/rép.git': '', 'ssh://git@host/org/re$po.git': '',
+            'git@host:org/valid_repo.v2.git': 'org/valid_repo.v2',
         }
         for value, expected in cases.items():
             with self.subTest(value=value):

@@ -242,7 +242,9 @@ def _normalize_remote(remote_url: str) -> str:
     parts = re.sub(r"\.git$", "", path.strip("/")).split("/")
     if len(parts) < 2 or any(part in {"", ".", ".."} for part in parts):
         return ""
-    return "/".join(parts[-2:])
+    # The final candidate must satisfy the automatic-name grammar: escapes, Unicode,
+    # spaces, and other unsupported characters fall through to portable metadata.
+    return _safe_name("/".join(parts[-2:]))
 
 
 _NAME_RE = re.compile(r"^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$")
