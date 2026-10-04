@@ -242,7 +242,10 @@ def _normalize_remote(remote_url: str) -> str:
     parts = re.sub(r"\.git$", "", path.strip("/")).split("/")
     if len(parts) < 2 or any(part in {"", ".", ".."} for part in parts):
         return ""
-    return "/".join(parts[-2:])
+    # The final candidate must satisfy the automatic-name grammar untrimmed: escapes,
+    # Unicode, spaces, and other unsupported characters fall through to portable metadata.
+    name = "/".join(parts[-2:])
+    return name if _safe_name(name) == name else ""
 
 
 _NAME_RE = re.compile(r"^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$")
@@ -358,7 +361,8 @@ def _package_name(root: Path, boundary: Optional[Path] = None) -> Optional[str]:
         text = re.sub(r"/\*.*?\*/", " ", _read_metadata(directory / "go.mod", boundary), flags=re.S)
         declarations = [line for line in text.splitlines() if re.match(r"\s*module\b", line)]
         if len(declarations) == 1:
-            match = re.fullmatch(r'\s*module\s+(?:"([^"\\]+)"|`([^`]+)`|([^\s"`]+))\s*(?://.*)?', declarations[0])
+            # Like Go's modfile lexer, an unquoted module path ends at an adjacent // comment.
+            match = re.fullmatch(r'\s*module\s+(?:"([^"\\]+)"|`([^`]+)`|((?:(?!//)[^\s"`])+))\s*(?://.*)?', declarations[0])
             if match:
                 name = _safe_name(next(value for value in match.groups() if value is not None))
                 if name:
